@@ -286,16 +286,15 @@ async with Fetcher(max_retries=5) as f:
 Ready to dive deeper? Here's what to explore:
 
 1. **[Examples](examples/)** - See retry configuration and advanced patterns
-2. **[API Documentation](https://github.com/cosmicbull/phantomfetch#api)** - Detailed API reference
-3. **[CHANGELOG](CHANGELOG.md)** - See what's new
-4. **[Contributing Guide](CONTRIBUTING.md)** - Help improve PhantomFetch
+2. **[CHANGELOG](CHANGELOG.md)** - See what's new
+3. **[Contributing Guide](CONTRIBUTING.md)** - Help improve PhantomFetch
 
 ## Community & Support
 
-- **🐛 Found a bug?** [Open an issue](https://github.com/cosmicbull/phantomfetch/issues/new?template=bug_report.md)
-- **💡 Have a feature idea?** [Request a feature](https://github.com/cosmicbull/phantomfetch/issues/new?template=feature_request.md)
-- **❓ Questions?** [Start a discussion](https://github.com/cosmicbull/phantomfetch/discussions)
-- **📖 Documentation issues?** [Improve the docs](https://github.com/cosmicbull/phantomfetch/edit/main/README.md)
+- **🐛 Found a bug?** [Open an issue](https://github.com/iristech-systems/PhantomFetch/issues/new?template=bug_report.md)
+- **💡 Have a feature idea?** [Request a feature](https://github.com/iristech-systems/PhantomFetch/issues/new?template=feature_request.md)
+- **❓ Questions?** [Start a discussion](https://github.com/iristech-systems/PhantomFetch/discussions)
+- **📖 Documentation issues?** [Improve the docs](https://github.com/iristech-systems/PhantomFetch/edit/main/README.md)
 
 ## Contributing
 
@@ -311,7 +310,7 @@ Check out our [Contributing Guide](CONTRIBUTING.md) to get started!
 
 ```bash
 # Clone and setup
-git clone https://github.com/cosmicbull/phantomfetch.git
+git clone https://github.com/iristech-systems/PhantomFetch.git
 cd phantomfetch
 uv sync
 uv run pre-commit install
@@ -338,7 +337,7 @@ Built on the shoulders of giants:
 - [msgspec](https://jcristharif.com/msgspec/) - Fast serialization
 - [OpenTelemetry](https://opentelemetry.io/) - Observability standard
 
-Special thanks to all [contributors](https://github.com/cosmicbull/phantomfetch/graphs/contributors) who help make PhantomFetch better!
+Special thanks to all [contributors](https://github.com/iristech-systems/PhantomFetch/graphs/contributors) who help make PhantomFetch better!
 
 ---
 
@@ -346,6 +345,6 @@ Special thanks to all [contributors](https://github.com/cosmicbull/phantomfetch/
 
 **Made with ❤️  for the web scraping community**
 
-[⭐ Star us on GitHub](https://github.com/cosmicbull/phantomfetch) • [📦 Install from PyPI](https://pypi.org/project/phantomfetch/)
+[⭐ Star us on GitHub](https://github.com/iristech-systems/PhantomFetch) • [📦 Install from PyPI](https://pypi.org/project/phantomfetch/)
 
 </div>

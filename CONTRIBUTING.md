@@ -8,8 +8,8 @@ Thank you for your interest in contributing to PhantomFetch! 🎉
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/cosmicbull/phantomfetch.git
-   cd phantomfetch
+   git clone https://github.com/iristech-systems/PhantomFetch.git
+   cd PhantomFetch
    ```
 
 2. **Install dependencies**
@@ -186,9 +186,9 @@ Use the GitHub issue tracker with the feature request template. Include:
 
 ## Questions?
 
-- Open a [Discussion](https://github.com/cosmicbull/phantomfetch/discussions)
-- Check existing [Issues](https://github.com/cosmicbull/phantomfetch/issues)
-- Read the [Documentation](https://github.com/cosmicbull/phantomfetch#readme)
+- Open a [Discussion](https://github.com/iristech-systems/PhantomFetch/discussions)
+- Check existing [Issues](https://github.com/iristech-systems/PhantomFetch/issues)
+- Read the [Documentation](https://github.com/iristech-systems/PhantomFetch#readme)
 
 ## Code of Conduct
 

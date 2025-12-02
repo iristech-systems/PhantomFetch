@@ -66,4 +66,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pytest test suite with async support
 - Development dependencies for docs, testing, and linting
 
-[0.1.0]: https://github.com/cosmicbull/phantomfetch/releases/tag/v0.1.0
+[0.1.0]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.1.0
