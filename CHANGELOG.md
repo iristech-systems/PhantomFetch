@@ -5,6 +5,23 @@ All notable changes to PhantomFetch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2025-12-05
+
+### Added
+- **Scrapeless CDP Recording Support** - PhantomFetch now automatically detects and reuses existing browser pages when connecting to remote CDP endpoints (e.g., Scrapeless)
+- New `use_existing_page` parameter in `CDPEngine` (defaults to `True`) for session recording compatibility
+- Example code for Scrapeless CDP integration ([`examples/scrapeless_cdp_recording.py`](examples/scrapeless_cdp_recording.py))
+- Documentation section in README for Scrapeless session recording
+
+### Changed
+- `CDPEngine.connect()` now detects existing contexts and pages from remote CDP connections
+- `CDPEngine.fetch()` reuses existing pages instead of creating new windows when available
+- Existing pages are no longer closed in the finally block when reusing
+
+### Fixed
+- Session recording compatibility with services that only support single-window recording (Scrapeless, etc.)
+
+
 ## [0.1.0] - 2025-12-02
 
 ### Added
@@ -67,3 +84,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Development dependencies for docs, testing, and linting
 
 [0.1.0]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.1.0
+
+[0.1.1]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.1.1

@@ -1,6 +1,6 @@
 [project]
 name = "phantomfetch"
-version = "0.1.0"
+version = "0.1.1"
 description = "High-performance agentic web scraping library combining curl-cffi speed with Playwright browser capabilities"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -54,13 +54,13 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "furo>=2025.9.25",
     "myst-parser>=4.0.1",
     "opentelemetry-sdk>=1.38.0",
     "pre-commit>=4.0.1",
     "pytest>=8.3.4",
     "pytest-asyncio>=0.24.0",
     "sphinx>=8.2.3",
+    "sphinx-wagtail-theme>=6.3.0",
 ]
 
 [tool.pytest.ini_options]

@@ -281,6 +281,29 @@ async with Fetcher(max_retries=5) as f:
         await asyncio.sleep(1)  # Be nice to servers
 ```
 
+### Scrapeless Session Recording
+
+When using Scrapeless's CDP endpoint for session recording, PhantomFetch automatically reuses existing browser windows:
+
+```python
+async with Fetcher(
+    browser_engine="cdp",
+    browser_engine_config={
+        "cdp_endpoint": "wss://YOUR_SESSION.scrapeless.com/chrome/cdp"
+        # use_existing_page=True (default) ensures recording compatibility
+    }
+) as f:
+    # Uses existing window - Scrapeless records this! ✓
+    resp = await f.fetch("https://example.com", engine="browser")
+```
+
+**Why this matters**: Scrapeless can only record a single window. By default (`use_existing_page=True`), PhantomFetch detects and reuses the existing browser page in your Scrapeless session instead of creating new windows.
+
+**To disable** (not recommended for recording): Set `use_existing_page=False` in `browser_engine_config`.
+
+See [`examples/scrapeless_cdp_recording.py`](examples/scrapeless_cdp_recording.py) for a complete example.
+
+
 ## Next Steps
 
 Ready to dive deeper? Here's what to explore:

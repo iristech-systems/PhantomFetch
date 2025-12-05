@@ -31,6 +31,7 @@ class CDPEngine:
         viewport: dict[str, int] | None = None,
         timeout: float = 60.0,
         cache: Optional["Cache"] = None,
+        use_existing_page: bool = True,
     ):
         """
         Args:
@@ -39,15 +40,20 @@ class CDPEngine:
             headless: Run browser headless (only for local launch)
             timeout: Default page timeout
             cache: Cache instance for sub-resource caching
+            use_existing_page: When connecting to remote CDP, reuse existing page
+                               if available (useful for recording services like Scrapeless)
         """
         self.cdp_endpoint = cdp_endpoint
         self.headless = headless
         self.viewport = viewport
         self.timeout = timeout
         self.cache = cache
+        self.use_existing_page = use_existing_page
 
         self._playwright: Any = None
         self._browser: Any = None
+        self._existing_context: Any = None
+        self._existing_page: Any = None
 
     async def connect(self) -> None:
         """Initialize Playwright and connect to browser."""
@@ -59,6 +65,13 @@ class CDPEngine:
             self._browser = await self._playwright.chromium.connect_over_cdp(
                 self.cdp_endpoint
             )
+
+            # Detect existing contexts/pages for recording compatibility
+            if self.use_existing_page and self._browser.contexts:
+                self._existing_context = self._browser.contexts[0]
+                if self._existing_context.pages:
+                    self._existing_page = self._existing_context.pages[0]
+                    logger.info("[cdp] Using existing page for recording compatibility")
         else:
             logger.info(f"[cdp] Launching local browser (headless={self.headless})")
             self._browser = await self._playwright.chromium.launch(
@@ -246,12 +259,22 @@ class CDPEngine:
 
             context = None
             page = None
+            using_existing = False
 
             try:
-                context = await self._browser.new_context(**context_opts)
+                # Use existing page/context if available (for recording compatibility)
+                if self._existing_page and self._existing_context:
+                    context = self._existing_context
+                    page = self._existing_page
+                    using_existing = True
+                    logger.debug(f"[cdp] Reusing existing page for {url}")
+                else:
+                    # Create new context/page as before
+                    context = await self._browser.new_context(**context_opts)
+                    page = await context.new_page()
 
                 # Set cookies
-                if cookies:
+                if cookies and not using_existing:
                     pw_cookies = []
                     if isinstance(cookies, dict):
                         for name, value in cookies.items():
@@ -277,7 +300,6 @@ class CDPEngine:
 
                     await context.add_cookies(pw_cookies)
 
-                page = await context.new_page()
                 page.set_default_timeout(timeout_ms)
 
                 # Setup network capture
@@ -399,7 +421,9 @@ class CDPEngine:
                 )
 
             finally:
-                if page:
-                    await page.close()
-                if context:
-                    await context.close()
+                # Only close if we created new page/context (not reusing existing)
+                if not using_existing:
+                    if page:
+                        await page.close()
+                    if context:
+                        await context.close()
