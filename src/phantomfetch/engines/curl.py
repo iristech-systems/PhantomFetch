@@ -1,12 +1,12 @@
-import time
 import random
-from typing import cast, Any
+import time
+from typing import Any, ClassVar, cast
 
 from curl_cffi.requests import AsyncSession, RequestsError
-
-from ..types import Response, Proxy, Cookie
-from ..telemetry import get_tracer
 from loguru import logger
+
+from ..telemetry import get_tracer
+from ..types import Cookie, Proxy, Response
 
 tracer = get_tracer()
 
@@ -16,7 +16,7 @@ class CurlEngine:
     curl_cffi based HTTP engine with anti-detection and retry logic.
     """
 
-    BROWSER_VERSIONS = [
+    BROWSER_VERSIONS: ClassVar[list[str]] = [
         "chrome120",
         "chrome119",
         "chrome116",
@@ -29,7 +29,7 @@ class CurlEngine:
         "edge99",
     ]
 
-    USER_AGENTS = {
+    USER_AGENTS: ClassVar[dict[str, list[str]]] = {
         "chrome": [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
@@ -40,7 +40,7 @@ class CurlEngine:
         ],
     }
 
-    RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+    RETRY_STATUS_CODES: ClassVar[set[int]] = {429, 500, 502, 503, 504}
 
     def __init__(
         self,
@@ -281,7 +281,7 @@ class CurlEngine:
 
         return headers
 
-    async def _backoff(self, attempt: int, backoff_base: float | None = None):
+    async def _backoff(self, attempt: int, backoff_base: float | None = None) -> None:
         """Exponential backoff with jitter"""
         import asyncio
 

@@ -1,20 +1,20 @@
 import asyncio
 import json
-from typing import Literal
+from typing import Any, Literal, cast
 
-from .types import (
-    Response,
-    Proxy,
-    Action,
-    Cookie,
-    BrowserEndpoint,
-    EngineType,
-    ProxyStrategy,
-)
-from .pool import ProxyPool
-from .engines import CurlEngine, CDPEngine, BaaSEngine
 from .cache import Cache
+from .engines import BaaSEngine, CDPEngine, CurlEngine
+from .pool import ProxyPool
 from .telemetry import get_tracer
+from .types import (
+    Action,
+    BrowserEndpoint,
+    Cookie,
+    EngineType,
+    Proxy,
+    ProxyStrategy,
+    Response,
+)
 
 tracer = get_tracer()
 
@@ -129,8 +129,70 @@ class Fetcher:
         await self._browser.connect()
         return self
 
-    async def __aexit__(self, *args) -> None:
+    async def __aexit__(self, *args: Any) -> None:
         await self._browser.disconnect()
+
+    def _normalize_actions(self, actions: list[Action | dict | str]) -> list[Action]:
+        """Normalize action shorthands to Action objects."""
+        normalized_actions: list[Action] = []
+        for a in actions:
+            if isinstance(a, Action):
+                normalized_actions.append(a)
+            elif isinstance(a, dict):
+                normalized_actions.append(Action(**a))
+            elif isinstance(a, str):
+                # Parse string shorthand
+                # "wait_for_load"
+                # "click:#selector"
+                # "wait:2000"
+                # "screenshot"
+                # "screenshot:filename.png"
+                if ":" in a:
+                    action_type, value = a.split(":", 1)
+                    if action_type == "click":
+                        normalized_actions.append(
+                            Action(action="click", selector=value)
+                        )
+                    elif action_type == "wait":
+                        # Check if value is number (timeout) or selector
+                        if value.isdigit():
+                            normalized_actions.append(
+                                Action(action="wait", timeout=int(value))
+                            )
+                        else:
+                            normalized_actions.append(
+                                Action(action="wait", selector=value)
+                            )
+                    elif action_type == "input":
+                        # input:#selector:value - might be too complex for simple split
+                        # Let's support simple input:#selector=value
+                        if "=" in value:
+                            sel, val = value.split("=", 1)
+                            normalized_actions.append(
+                                Action(action="input", selector=sel, value=val)
+                            )
+                        else:
+                            # Fallback or error? Let's assume just selector focus? No, input needs value.
+                            # Maybe just don't support complex input in shorthand.
+                            pass
+                    elif action_type == "screenshot":
+                        normalized_actions.append(
+                            Action(action="screenshot", value=value)
+                        )
+                    elif action_type == "scroll":
+                        normalized_actions.append(
+                            Action(action="scroll", selector=value)
+                        )
+                    elif action_type == "hover":
+                        normalized_actions.append(
+                            Action(action="hover", selector=value)
+                        )
+                # No arguments
+                elif a == "wait_for_load":
+                    normalized_actions.append(Action(action="wait_for_load"))
+                elif a == "screenshot":
+                    normalized_actions.append(Action(action="screenshot"))
+        return normalized_actions
 
     async def fetch(
         self,
@@ -173,66 +235,7 @@ class Fetcher:
         # Normalize actions - implies browser
         normalized_actions: list[Action] | None = None
         if actions:
-            normalized_actions = []
-            for a in actions:
-                if isinstance(a, Action):
-                    normalized_actions.append(a)
-                elif isinstance(a, dict):
-                    normalized_actions.append(Action(**a))
-                elif isinstance(a, str):
-                    # Parse string shorthand
-                    # "wait_for_load"
-                    # "click:#selector"
-                    # "wait:2000"
-                    # "screenshot"
-                    # "screenshot:filename.png"
-                    if ":" in a:
-                        action_type, value = a.split(":", 1)
-                        if action_type == "click":
-                            normalized_actions.append(
-                                Action(action="click", selector=value)
-                            )
-                        elif action_type == "wait":
-                            # Check if value is number (timeout) or selector
-                            if value.isdigit():
-                                normalized_actions.append(
-                                    Action(action="wait", timeout=int(value))
-                                )
-                            else:
-                                normalized_actions.append(
-                                    Action(action="wait", selector=value)
-                                )
-                        elif action_type == "input":
-                            # input:#selector:value - might be too complex for simple split
-                            # Let's support simple input:#selector=value
-                            if "=" in value:
-                                sel, val = value.split("=", 1)
-                                normalized_actions.append(
-                                    Action(action="input", selector=sel, value=val)
-                                )
-                            else:
-                                # Fallback or error? Let's assume just selector focus? No, input needs value.
-                                # Maybe just don't support complex input in shorthand.
-                                pass
-                        elif action_type == "screenshot":
-                            normalized_actions.append(
-                                Action(action="screenshot", value=value)
-                            )
-                        elif action_type == "scroll":
-                            normalized_actions.append(
-                                Action(action="scroll", selector=value)
-                            )
-                        elif action_type == "hover":
-                            normalized_actions.append(
-                                Action(action="hover", selector=value)
-                            )
-                    else:
-                        # No arguments
-                        if a == "wait_for_load":
-                            normalized_actions.append(Action(action="wait_for_load"))
-                        elif a == "screenshot":
-                            normalized_actions.append(Action(action="screenshot"))
-
+            normalized_actions = self._normalize_actions(actions)
             engine = "browser"
 
         # Start OTel span
@@ -363,7 +366,7 @@ class Fetcher:
 
         # Convert exceptions to Response objects
         responses = []
-        for url, result in zip(urls, results):
+        for url, result in zip(urls, results, strict=True):
             if isinstance(result, Exception):
                 responses.append(
                     Response(
@@ -424,11 +427,8 @@ class Fetcher:
         async with self._semaphore:
             async with self._browser_semaphore:
                 if self._browser_engine_type == "cdp":
-                    from .engines import CDPEngine
-                    from typing import cast
-
-                    browser = cast(CDPEngine, self._browser)
-                    return await browser.fetch(
+                    browser_cdp = cast(CDPEngine, self._browser)
+                    return await browser_cdp.fetch(
                         url=url,
                         proxy=proxy,
                         headers=headers,
@@ -439,11 +439,8 @@ class Fetcher:
                         wait_until=wait_until,
                     )
                 else:
-                    from .engines import BaaSEngine
-                    from typing import cast
-
-                    browser = cast(BaaSEngine, self._browser)
-                    return await browser.fetch(
+                    browser_baas = cast(BaaSEngine, self._browser)
+                    return await browser_baas.fetch(
                         url=url,
                         proxy=proxy,
                         headers=headers,

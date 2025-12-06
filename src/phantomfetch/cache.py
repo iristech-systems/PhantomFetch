@@ -5,9 +5,10 @@ import time
 from pathlib import Path
 from typing import Protocol
 
-from .types import Response, CacheStrategy
-from .telemetry import get_tracer
 from loguru import logger
+
+from .telemetry import get_tracer
+from .types import CacheStrategy, Response
 
 tracer = get_tracer()
 
@@ -135,6 +136,9 @@ class FileSystemCache:
 
             # Key is expected to be the URL or a composite key
             # For now, we assume key is the URL or we hash it
+            # Wrapper for get logic to ensure we set attributes even on early returns if possible,
+            # but wait, early returns usually mean no cache or error.
+
             # The Fetcher passes "engine:url" as key.
             # We should probably strip the engine prefix or handle it.
 
@@ -152,7 +156,7 @@ class FileSystemCache:
                 return None
 
             try:
-                with open(file_path, "r") as f:
+                with open(file_path) as f:
                     data = json.load(f)
 
                 resource_type = data.get("resourceType", "other")
@@ -165,6 +169,11 @@ class FileSystemCache:
 
                     # Reconstruct Response object
                     span.set_attribute("phantomfetch.cache.hit", True)
+                    span.set_attribute("phantomfetch.cache.size_bytes", len(body_bytes))
+                    span.set_attribute(
+                        "phantomfetch.cache.resource_type", resource_type
+                    )
+
                     return Response(
                         url=resp_data["url"],
                         status=resp_data["status"],
@@ -236,11 +245,11 @@ class FileSystemCache:
         except Exception as e:
             logger.warning(f"[cache] Failed to write cache for {key}: {e}")
 
-    def clear_expired(self):
+    def clear_expired(self) -> None:
         """Remove expired entries from the cache."""
         for file_path in self.cache_dir.glob("*.json"):
             try:
-                with open(file_path, "r") as f:
+                with open(file_path) as f:
                     data = json.load(f)
 
                 resource_type = data.get("resourceType", "other")

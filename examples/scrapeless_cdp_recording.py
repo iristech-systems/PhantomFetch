@@ -5,6 +5,7 @@ to ensure proper session recording compatibility (single window).
 """
 
 import asyncio
+
 from phantomfetch import Fetcher
 
 

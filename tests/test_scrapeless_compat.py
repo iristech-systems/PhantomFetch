@@ -5,6 +5,7 @@ to a remote CDP endpoint, avoiding creation of new windows.
 """
 
 import asyncio
+
 from phantomfetch.engines.browser.cdp import CDPEngine
 
 

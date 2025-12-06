@@ -1,8 +1,7 @@
-import msgspec
-from typing import Literal, Any, TYPE_CHECKING
+from typing import Any, Literal
 
-if TYPE_CHECKING:
-    from rusticsoup import WebPage
+import msgspec
+from rusticsoup import WebPage
 
 EngineType = Literal["curl", "browser", "auto"]
 ProxyStrategy = Literal["round_robin", "random", "sticky", "geo_match", "failover"]
@@ -193,8 +192,6 @@ class Response(msgspec.Struct):
         return msgspec.json.decode(clean_body)
 
     def to_page(self) -> "WebPage":
-        from rusticsoup import WebPage
-
         return WebPage(
             self.body.decode("utf-8", errors="replace"),
             url=self.url,

@@ -1,11 +1,13 @@
 """Tests for FileSystemCache."""
 
-import pytest
-from pathlib import Path
-import tempfile
 import shutil
-from phantomfetch.cache import FileSystemCache
+import tempfile
+from pathlib import Path
+
+import pytest
+
 from phantomfetch import Response
+from phantomfetch.cache import FileSystemCache
 
 
 class TestFileSystemCache:

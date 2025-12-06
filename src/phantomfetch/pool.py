@@ -1,6 +1,8 @@
 import random
 import time
+from typing import Any, cast
 from urllib.parse import urlparse
+
 from .types import Proxy, ProxyStrategy
 
 
@@ -44,21 +46,20 @@ class ProxyPool:
             case _:
                 return random.choice(self.proxies)
 
-    def mark_failed(self, proxy: Proxy):
+    def mark_failed(self, proxy: Proxy) -> None:
         proxy.failures += 1
 
-    def mark_success(self, proxy: Proxy):
+    def mark_success(self, proxy: Proxy) -> None:
         proxy.failures = max(0, proxy.failures - 1)
         proxy.last_used = time.time()
 
     @classmethod
-    def from_locations(cls, mapping: dict[str, list[str]], **kwargs) -> "ProxyPool":
+    def from_locations(
+        cls, mapping: dict[str, list[str]], **kwargs: Any
+    ) -> "ProxyPool":
         proxies = [
             Proxy(url=url, location=loc)
             for loc, urls in mapping.items()
             for url in urls
         ]
-        # Cast to satisfy type checker (list is invariant)
-        from typing import cast
-
         return cls(cast(list[Proxy | str], proxies), **kwargs)

@@ -1,6 +1,6 @@
 import logging
 
-from ...types import Response, Proxy, Action, BrowserEndpoint
+from ...types import Action, BrowserEndpoint, Proxy, Response
 
 logger = logging.getLogger(__name__)
 

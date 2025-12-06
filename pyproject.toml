@@ -1,6 +1,6 @@
 [project]
 name = "phantomfetch"
-version = "0.1.1"
+version = "0.1.2"
 description = "High-performance agentic web scraping library combining curl-cffi speed with Playwright browser capabilities"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -61,6 +61,8 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "sphinx>=8.2.3",
     "sphinx-wagtail-theme>=6.3.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
 ]
 
 [tool.pytest.ini_options]
@@ -68,3 +70,25 @@ testpaths = ["tests"]
 norecursedirs = ["notebooks"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "PL", "RUF"]
+ignore = ["PLR0913", "PLR0912", "E501", "PLR0915", "PLR2004", "PLR0911", "PLC0415"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR2004"]
+
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["rusticsoup.*", "uvloop.*"]
+ignore_missing_imports = true

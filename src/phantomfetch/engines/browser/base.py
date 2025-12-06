@@ -1,9 +1,10 @@
-import time
 import logging
+import time
+from typing import Any
 
 import httpx
 
-from ...types import Response, Proxy, Action, BrowserEndpoint
+from ...types import Action, BrowserEndpoint, Proxy, Response
 from .actions import actions_to_payload
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ class BaaSEngine:
         actions: list[Action] | None = None,
         timeout: float | None = None,
         location: str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Response:
         """
         Fetch URL via BaaS.

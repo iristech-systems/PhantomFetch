@@ -1,6 +1,6 @@
 """Tests for Response type and basic functionality."""
 
-from phantomfetch import Response, Cookie
+from phantomfetch import Cookie, Response
 from phantomfetch.types import Action, NetworkExchange
 
 

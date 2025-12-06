@@ -1,6 +1,7 @@
 # engines/base.py
-from typing import Protocol
-from ..types import Response, Proxy, Action
+from typing import Any, Protocol
+
+from ..types import Action, Proxy, Response
 
 
 class Engine(Protocol):
@@ -10,7 +11,7 @@ class Engine(Protocol):
         proxy: Proxy | None = None,
         headers: dict[str, str] | None = None,
         timeout: float = 30.0,
-        **kwargs,
+        **kwargs: Any,
     ) -> Response: ...
 
 
@@ -22,7 +23,7 @@ class BrowserEngine(Protocol):
         headers: dict[str, str] | None = None,
         actions: list[Action] | None = None,
         timeout: float = 30.0,
-        **kwargs,
+        **kwargs: Any,
     ) -> Response: ...
 
     async def connect(self) -> None: ...

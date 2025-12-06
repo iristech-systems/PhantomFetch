@@ -1,5 +1,6 @@
 import pytest
-from phantomfetch import Fetcher, Action
+
+from phantomfetch import Action, Fetcher
 
 
 @pytest.mark.asyncio

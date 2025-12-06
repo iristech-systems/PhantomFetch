@@ -8,6 +8,7 @@ This shows how to customize retry behavior for specific scenarios:
 """
 
 import asyncio
+
 from phantomfetch import Fetcher
 
 

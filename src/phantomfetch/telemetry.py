@@ -1,7 +1,7 @@
 from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor, ConsoleSpanExporter
 from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
 
 
 def configure_telemetry(
@@ -30,6 +30,6 @@ def configure_telemetry(
     trace.set_tracer_provider(provider)
 
 
-def get_tracer():
+def get_tracer() -> trace.Tracer:
     """Get the phantomfetch tracer."""
     return trace.get_tracer("phantomfetch")

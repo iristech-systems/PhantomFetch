@@ -1,16 +1,20 @@
 import time
-from playwright.async_api import async_playwright
-from loguru import logger
-from typing import Optional, TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
-from ...types import Response, Proxy, Action, Cookie
-from .actions import execute_actions
+from loguru import logger
+from opentelemetry import context
+from playwright.async_api import async_playwright
+
 from ...telemetry import get_tracer
+from ...types import Action, Cookie, Proxy, Response
+from .actions import execute_actions
 
 tracer = get_tracer()
 
 if TYPE_CHECKING:
-    from playwright.async_api import Route, Response as PlaywrightResponse
+    from playwright.async_api import Response as PlaywrightResponse
+    from playwright.async_api import Route
+
     from ...cache import Cache
 
 
@@ -257,21 +261,21 @@ class CDPEngine:
             if headers:
                 context_opts["extra_http_headers"] = headers
 
-            context = None
+            browser_context = None
             page = None
             using_existing = False
 
             try:
                 # Use existing page/context if available (for recording compatibility)
                 if self._existing_page and self._existing_context:
-                    context = self._existing_context
+                    browser_context = self._existing_context
                     page = self._existing_page
                     using_existing = True
                     logger.debug(f"[cdp] Reusing existing page for {url}")
                 else:
                     # Create new context/page as before
-                    context = await self._browser.new_context(**context_opts)
-                    page = await context.new_page()
+                    browser_context = await self._browser.new_context(**context_opts)
+                    page = await browser_context.new_page()
 
                 # Set cookies
                 if cookies and not using_existing:
@@ -283,7 +287,11 @@ class CDPEngine:
                             )
                     elif isinstance(cookies, list):
                         for cookie in cookies:
-                            c = {"name": cookie.name, "value": cookie.value, "url": url}
+                            c: dict[str, Any] = {
+                                "name": cookie.name,
+                                "value": cookie.value,
+                                "url": url,
+                            }
                             if cookie.domain:
                                 c["domain"] = cookie.domain
                             if cookie.path:
@@ -298,56 +306,71 @@ class CDPEngine:
                                 c["sameSite"] = cookie.same_site
                             pw_cookies.append(c)
 
-                    await context.add_cookies(pw_cookies)
+                    await browser_context.add_cookies(pw_cookies)
 
                 page.set_default_timeout(timeout_ms)
 
                 # Setup network capture
                 network_log: list[Any] = []
 
-                async def on_response(response: "PlaywrightResponse"):
-                    # Handle caching logic first
-                    await self._handle_response(response)
+                # Capture current context to propagate to callbacks
+                current_ctx = context.get_current()
 
-                    # Network capture logic
+                async def on_response(response: "PlaywrightResponse") -> None:
+                    token = context.attach(current_ctx)
                     try:
-                        req = response.request
-                        if req.resource_type in ("xhr", "fetch"):
-                            # Capture body safely
-                            resp_body = None
-                            try:
-                                # Limit body size capture to avoid memory issues
-                                body_bytes = await response.body()
-                                if len(body_bytes) < 1024 * 1024:  # 1MB limit
-                                    resp_body = body_bytes.decode(
-                                        "utf-8", errors="replace"
+                        # Handle caching logic first
+                        await self._handle_response(response)
+
+                        # Network capture logic
+                        try:
+                            req = response.request
+                            if req.resource_type in ("xhr", "fetch"):
+                                # Capture body safely
+                                resp_body = None
+                                try:
+                                    # Limit body size capture to avoid memory issues
+                                    body_bytes = await response.body()
+                                    if len(body_bytes) < 1024 * 1024:  # 1MB limit
+                                        resp_body = body_bytes.decode(
+                                            "utf-8", errors="replace"
+                                        )
+                                    else:
+                                        resp_body = "<Body too large>"
+                                except Exception:
+                                    resp_body = "<Failed to capture body>"
+
+                                from ...types import NetworkExchange
+
+                                network_log.append(
+                                    NetworkExchange(
+                                        url=response.url,
+                                        method=req.method,
+                                        status=response.status,
+                                        resource_type=req.resource_type,
+                                        request_headers=await req.all_headers(),
+                                        response_headers=await response.all_headers(),
+                                        request_body=req.post_data,
+                                        response_body=resp_body,
+                                        duration=0.0,  # TODO: Calculate duration if needed
                                     )
-                                else:
-                                    resp_body = "<Body too large>"
-                            except Exception:
-                                resp_body = "<Failed to capture body>"
-
-                            from ...types import NetworkExchange
-
-                            network_log.append(
-                                NetworkExchange(
-                                    url=response.url,
-                                    method=req.method,
-                                    status=response.status,
-                                    resource_type=req.resource_type,
-                                    request_headers=await req.all_headers(),
-                                    response_headers=await response.all_headers(),
-                                    request_body=req.post_data,
-                                    response_body=resp_body,
-                                    duration=0.0,  # TODO: Calculate duration if needed
                                 )
-                            )
-                    except Exception as e:
-                        logger.warning(f"[cdp] Capture error: {e}")
+                        except Exception as e:
+                            logger.warning(f"[cdp] Capture error: {e}")
+                    finally:
+                        context.detach(token)
+
+                async def handle_route_with_context(route: "Route") -> None:
+                    # Attach the captured context
+                    token = context.attach(current_ctx)
+                    try:
+                        await self._handle_route(route)
+                    finally:
+                        context.detach(token)
 
                 # Setup caching and capture
                 if self.cache:
-                    await page.route("**/*", self._handle_route)
+                    await page.route("**/*", handle_route_with_context)
 
                 # We use a single listener for both cache and capture
                 page.on("response", on_response)
@@ -379,7 +402,7 @@ class CDPEngine:
 
                 # Get cookies
                 final_cookies = []
-                for c in await context.cookies():
+                for c in await browser_context.cookies():
                     final_cookies.append(
                         Cookie(
                             name=c["name"],
@@ -425,5 +448,5 @@ class CDPEngine:
                 if not using_existing:
                     if page:
                         await page.close()
-                    if context:
-                        await context.close()
+                    if browser_context:
+                        await browser_context.close()

@@ -1,6 +1,6 @@
 """Tests for Fetcher initialization and configuration."""
 
-from phantomfetch import Fetcher, Proxy, FileSystemCache
+from phantomfetch import Fetcher, FileSystemCache, Proxy
 from phantomfetch.pool import ProxyPool
 
 

@@ -1,6 +1,7 @@
 """Tests for CurlEngine."""
 
 import pytest
+
 from phantomfetch.engines.curl import CurlEngine
 
 

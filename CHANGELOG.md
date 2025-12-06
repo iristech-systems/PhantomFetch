@@ -5,6 +5,17 @@ All notable changes to PhantomFetch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2025-12-05
+
+### Fixed
+- **Telemetry Context Propagation**: Fixed disconnected OpenTelemetry spans in `CDPEngine`. Spans generated during request interception (e.g., cache hits) are now correctly nested under the parent fetch span.
+
+### Added
+- **Browser Action Telemetry**: Added child spans for individual browser actions (click, wait, etc.).
+- **Telemetry Enrichment**:
+    - Added `phantomfetch.cache.size_bytes` and `phantomfetch.cache.resource_type` to cache spans.
+    - Added detailed execution metrics (duration, success, input length) to action spans.
+
 ## [0.1.1] - 2025-12-05
 
 ### Added
@@ -86,3 +97,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.0]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.1.0
 
 [0.1.1]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.1.1
+[0.1.2]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.1.2

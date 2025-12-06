@@ -1,18 +1,18 @@
-from .types import (
-    Response,
-    Proxy,
-    Action,
-    BrowserEndpoint,
-    EngineType,
-    ProxyStrategy,
-    ActionType,
-    NetworkExchange,
-    Cookie,
-)
-from .pool import ProxyPool
-from .fetch import Fetcher
-from .engines import CurlEngine, CDPEngine, BaaSEngine
 from .cache import FileSystemCache
+from .engines import BaaSEngine, CDPEngine, CurlEngine
+from .fetch import Fetcher
+from .pool import ProxyPool
+from .types import (
+    Action,
+    ActionType,
+    BrowserEndpoint,
+    Cookie,
+    EngineType,
+    NetworkExchange,
+    Proxy,
+    ProxyStrategy,
+    Response,
+)
 
 # Try to install uvloop if available
 try:
@@ -60,24 +60,21 @@ async def fetch(
 get = fetch
 
 __all__ = [
-    # Main API
-    "Fetcher",
-    "fetch",
-    "get",
-    "Response",
-    "Proxy",
-    "ProxyPool",
     "Action",
+    "ActionType",
+    "BaaSEngine",
     "BrowserEndpoint",
+    "CDPEngine",
+    "Cookie",
+    "CurlEngine",
+    "EngineType",
+    "Fetcher",
     "FileSystemCache",
     "NetworkExchange",
-    "Cookie",
-    # Types
-    "EngineType",
+    "Proxy",
+    "ProxyPool",
     "ProxyStrategy",
-    "ActionType",
-    # Engines (advanced)
-    "CurlEngine",
-    "CDPEngine",
-    "BaaSEngine",
+    "Response",
+    "fetch",
+    "get",
 ]
