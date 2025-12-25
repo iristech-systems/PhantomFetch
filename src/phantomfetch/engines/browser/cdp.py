@@ -207,6 +207,7 @@ class CDPEngine:
         timeout: float | None = None,
         location: str | None = None,
         wait_until: str = "domcontentloaded",
+        block_resources: list[str] | None = None,
     ) -> Response:
         """
         Fetch a URL using Playwright.
@@ -219,6 +220,7 @@ class CDPEngine:
             actions: Browser actions to execute after load
             timeout: Page timeout override
             wait_until: Load state to wait for (domcontentloaded, load, networkidle)
+            block_resources: List of resource types to block (e.g., ["image", "media"])
 
         Returns:
             Response object
@@ -239,6 +241,11 @@ class CDPEngine:
                 # Track custom headers for debugging/analytics
                 span.set_attribute(
                     "phantomfetch.browser.custom_headers", list(headers.keys())
+                )
+
+            if block_resources:
+                span.set_attribute(
+                    "phantomfetch.browser.block_resources", block_resources
                 )
 
             if not self._browser:
@@ -342,6 +349,26 @@ class CDPEngine:
 
                                 from ...types import NetworkExchange
 
+                                # Calculate timing
+                                duration = 0.0
+                                # response_end = response.request.timing.get("responseEnd", -1)
+                                # request_start = response.request.timing.get("requestStart", -1)
+                                # That might not be populated or available.
+                                # Playwright response timings are in request().timing
+                                timing = req.timing
+                                if (
+                                    timing
+                                    and timing.get("responseEnd") != -1
+                                    and timing.get("requestStart") != -1
+                                ):
+                                    # Timings are relative to startTime.
+                                    # responseEnd - requestStart = duration in ms
+                                    duration = (
+                                        timing["responseEnd"] - timing["requestStart"]
+                                    ) / 1000.0
+                                    # If duration < 0 (e.g. from cache or served locally), set 0
+                                    duration = max(0.0, duration)
+
                                 network_log.append(
                                     NetworkExchange(
                                         url=response.url,
@@ -352,7 +379,7 @@ class CDPEngine:
                                         response_headers=await response.all_headers(),
                                         request_body=req.post_data,
                                         response_body=resp_body,
-                                        duration=0.0,  # TODO: Calculate duration if needed
+                                        duration=duration,
                                     )
                                 )
                         except Exception as e:
@@ -364,12 +391,21 @@ class CDPEngine:
                     # Attach the captured context
                     token = context.attach(current_ctx)
                     try:
+                        # Handle resource blocking
+                        if (
+                            block_resources
+                            and route.request.resource_type in block_resources
+                        ):
+                            await route.abort()
+                            return
+
                         await self._handle_route(route)
                     finally:
                         context.detach(token)
 
-                # Setup caching and capture
-                if self.cache:
+                # Setup caching, blocking and capture
+                # If we have cache OR block_resources, we need routing
+                if self.cache or block_resources:
                     await page.route("**/*", handle_route_with_context)
 
                 # We use a single listener for both cache and capture

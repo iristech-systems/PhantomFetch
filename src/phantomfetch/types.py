@@ -1,4 +1,5 @@
-from typing import Any, Literal
+from enum import Enum
+from typing import Annotated, Any, Literal
 
 import msgspec
 from rusticsoup import WebPage
@@ -6,7 +7,8 @@ from rusticsoup import WebPage
 EngineType = Literal["curl", "browser", "auto"]
 ProxyStrategy = Literal["round_robin", "random", "sticky", "geo_match", "failover"]
 CacheStrategy = Literal["all", "resources", "conservative"]
-ActionType = Literal[
+
+ActionTypeLiteral = Literal[
     "wait",
     "click",
     "input",
@@ -16,7 +18,21 @@ ActionType = Literal[
     "screenshot",
     "wait_for_load",
     "evaluate",
+    "solve_captcha",
 ]
+
+
+class ActionType(str, Enum):
+    WAIT = "wait"
+    CLICK = "click"
+    INPUT = "input"
+    SCROLL = "scroll"
+    SELECT = "select"
+    HOVER = "hover"
+    SCREENSHOT = "screenshot"
+    WAIT_FOR_LOAD = "wait_for_load"
+    EVALUATE = "evaluate"
+    SOLVE_CAPTCHA = "solve_captcha"
 
 
 class Proxy(msgspec.Struct):
@@ -64,12 +80,27 @@ class Action(msgspec.Struct):
         selector: CSS selector to target
         value: Input value or file path
         timeout: Action timeout in ms
+        api_key: API key for CAPTCHA solver (optional)
+        provider: CAPTCHA provider name (optional)
+        if_selector: Selector to check before executing (optional)
+        if_selector_timeout: Timeout to wait for if_selector (optional)
+        state: State to wait for ("visible", "attached", etc.) (optional)
+        x: X coordinate for scroll (optional)
+        y: Y coordinate for scroll (optional)
     """
 
     action: ActionType
     selector: str | None = None
+    if_selector: str | None = None
+    if_selector_timeout: int = 0
     value: str | int | None = None
-    timeout: int = 30000
+    # Validate timeout is non-negative
+    timeout: Annotated[int, msgspec.Meta(ge=0)] = 30000
+    api_key: str | None = None
+    provider: str | None = None
+    state: str | None = None
+    x: int | None = None
+    y: int | None = None
 
 
 class ActionResult(msgspec.Struct):

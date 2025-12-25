@@ -43,6 +43,56 @@ async def execute_actions(page: "Page", actions: list[Action]) -> list["ActionRe
             logger.debug(
                 f"[browser] Executing: {action.action} {action.selector or ''}"
             )
+
+            # Handle conditional action logic
+            if action.if_selector:
+                condition_met = False
+
+                # If timeout is specified, wait for selector
+                if action.if_selector_timeout > 0:
+                    try:
+                        logger.debug(
+                            f"[browser] Waiting up to {action.if_selector_timeout}ms for condition: {action.if_selector}"
+                        )
+                        # wait_for_selector waits for state='visible' by default which is usually what we want
+                        # for a "label appearing".
+                        await page.wait_for_selector(
+                            action.if_selector,
+                            timeout=action.if_selector_timeout,
+                            state="attached",  # Just existence in DOM as per original logic, checks existence
+                        )
+                        condition_met = True
+                    except (
+                        Exception
+                    ):  # TimeoutError primarily, but playwright errors can be diverse
+                        condition_met = False
+                else:
+                    # Immediate check
+                    condition_count = await page.locator(action.if_selector).count()
+                    condition_met = condition_count > 0
+
+                if not condition_met:
+                    logger.debug(
+                        f"[browser] Skipping action {action.action} because if_selector '{action.if_selector}' not found (timeout={action.if_selector_timeout})"
+                    )
+                    # Create a skipped result
+                    result = ActionResult(
+                        action=action,
+                        success=True,
+                        data="Skipped (condition not met)",
+                    )
+                    span.set_attribute("phantomfetch.action.skipped", True)
+                    span.set_attribute(
+                        "phantomfetch.action.skipped_reason", "condition_not_met"
+                    )
+                    results.append(result)
+                    continue
+
+                logger.debug(
+                    f"[browser] Condition met for {action.action}: '{action.if_selector}' found"
+                )
+                span.set_attribute("phantomfetch.action.condition_met", True)
+
             start_time = time.perf_counter()
             result = ActionResult(action=action, success=True)
 
@@ -55,20 +105,15 @@ async def execute_actions(page: "Page", actions: list[Action]) -> list["ActionRe
                             )
 
                         if action.selector:
+                            # Use state if provided, default to visible or attached based on context?
+                            # Playwright wait_for_selector defaults to 'visible'.
+                            # If user provided state (visible, detached, hidden, attached), use it.
+                            state = action.state or "visible"
                             await page.wait_for_selector(
                                 action.selector,
                                 timeout=action.timeout,
+                                state=state,
                             )
-                        # Handle wait:time syntax if handled in normalization or here?
-                        # normalization usually converts generic waits.
-                        # If timeout only (no selector), normalization makes it wait(timeout=...)
-                        # But wait action in types has selector/timeout.
-                        # If simple wait(2000), it's normalized to Action(action='wait', timeout=2000).
-                        # We need to handle that here too if not handled.
-                        # CDPEngine doesn't seem to sleep on wait?
-                        # Let's check wait logic in previous content.
-                        # Ah, case "wait": if action.selector... await page.wait_for_selector.
-                        # What if no selector? just timeout?
                         elif action.timeout:
                             await page.wait_for_timeout(action.timeout)
 
@@ -104,12 +149,19 @@ async def execute_actions(page: "Page", actions: list[Action]) -> list["ActionRe
                             span.set_attribute(
                                 "phantomfetch.action.timeout", action.timeout
                             )
-                        if action.selector:
+
+                        if action.selector == "top":
+                            await page.evaluate("window.scrollTo(0, 0)")
+                        elif action.x is not None or action.y is not None:
+                            x = action.x or 0
+                            y = action.y or 0
+                            await page.evaluate(f"window.scrollTo({x}, {y})")
+                        elif action.selector:
                             await page.locator(
                                 action.selector
                             ).scroll_into_view_if_needed(timeout=action.timeout)
                         else:
-                            # Scroll to bottom if no selector
+                            # Scroll to bottom if no selector and no coordinates
                             await page.evaluate(
                                 "window.scrollTo(0, document.body.scrollHeight)"
                             )
@@ -169,6 +221,17 @@ async def execute_actions(page: "Page", actions: list[Action]) -> list["ActionRe
                         if action.value:
                             eval_result = await page.evaluate(str(action.value))
                             result.data = eval_result
+
+                    case "solve_captcha":
+                        from ...captcha import TwoCaptchaSolver
+
+                        solver = TwoCaptchaSolver()
+                        token = await solver.solve(page, action)
+                        if token:
+                            result.data = token
+                        else:
+                            result.success = False
+                            result.error = "Failed to solve CAPTCHA"
 
                     case _:
                         logger.warning(f"[browser] Unknown action: {action.action}")

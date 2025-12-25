@@ -16,10 +16,8 @@ async def main():
     # PhantomFetch automatically reuses existing pages when connecting to remote CDP
     async with Fetcher(
         browser_engine="cdp",
-        browser_engine_config={
-            "cdp_endpoint": scrapeless_cdp,
-            # use_existing_page=True is the default for CDP endpoints
-        },
+        cdp_endpoint=scrapeless_cdp,
+        # cdp_use_existing_page=True # Default is True
     ) as f:
         # This will use the existing window in your Scrapeless session
         # Scrapeless can now record this request!
@@ -40,10 +38,8 @@ async def disable_page_reuse():
 
     async with Fetcher(
         browser_engine="cdp",
-        browser_engine_config={
-            "cdp_endpoint": "wss://YOUR_SESSION_ID.scrapeless.com/chrome/cdp",
-            "use_existing_page": False,  # Creates new windows (breaks recording)
-        },
+        cdp_endpoint="wss://YOUR_SESSION_ID.scrapeless.com/chrome/cdp",
+        cdp_use_existing_page=False,  # Creates new windows (breaks recording)
     ) as f:
         # This creates a new window - Scrapeless won't record it
         _response = await f.fetch("https://example.com", engine="browser")
