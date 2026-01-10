@@ -55,6 +55,6 @@ Thumbs.db
 # Project specific
 reproduce_json_error.py
 test_google_*.png
-docs/
+docs/_build/
 notebooks/
 /test_*
