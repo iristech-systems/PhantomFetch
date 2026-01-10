@@ -2,6 +2,8 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, Mock
 
+from playwright.async_api import Page
+
 from phantomfetch.engines.browser.actions import execute_actions
 from phantomfetch.types import Action
 
@@ -11,9 +13,7 @@ class TestConditionalActions(unittest.TestCase):
         """Test that an action is skipped when if_selector condition is not met."""
 
         async def run_test():
-            mock_page = (
-                Mock()
-            )  # Page itself can be Mock, methods are AsyncMock usually.
+            mock_page = Mock(spec=Page)
             # But specific methods need care.
             # page.locator is sync, returns Locator. Locator.count is async.
 
@@ -42,7 +42,7 @@ class TestConditionalActions(unittest.TestCase):
         """Test that an action is executed when if_selector condition IS met."""
 
         async def run_test():
-            mock_page = Mock()
+            mock_page = Mock(spec=Page)
 
             mock_locator = Mock()
             # method count is async, return 1
@@ -67,9 +67,10 @@ class TestConditionalActions(unittest.TestCase):
         """Test skipping after waiting for timeout."""
 
         async def run_test():
-            mock_page = Mock()
-            # wait_for_selector throws error on timeout
-            mock_page.wait_for_selector = AsyncMock(side_effect=Exception("Timeout"))
+            mock_page = Mock(spec=Page)
+            mock_locator = Mock()
+            mock_locator.wait_for = AsyncMock(side_effect=Exception("Timeout"))
+            mock_page.locator.return_value = mock_locator
 
             actions = [
                 Action(
@@ -85,9 +86,7 @@ class TestConditionalActions(unittest.TestCase):
             self.assertEqual(len(results), 1)
             self.assertTrue(results[0].success)
             self.assertEqual(results[0].data, "Skipped (condition not met)")
-            mock_page.wait_for_selector.assert_called_once_with(
-                "#async-el", timeout=500, state="attached"
-            )
+            mock_locator.wait_for.assert_called_once_with(timeout=500, state="attached")
 
         asyncio.run(run_test())
 
@@ -95,9 +94,10 @@ class TestConditionalActions(unittest.TestCase):
         """Test executing after successful wait."""
 
         async def run_test():
-            mock_page = Mock()
-            # wait_for_selector returns successfully
-            mock_page.wait_for_selector = AsyncMock(return_value=None)
+            mock_page = Mock(spec=Page)
+            mock_locator = Mock()
+            mock_locator.wait_for = AsyncMock(return_value=None)
+            mock_page.locator.return_value = mock_locator
             mock_page.wait_for_timeout = AsyncMock()
 
             actions = [
@@ -114,9 +114,7 @@ class TestConditionalActions(unittest.TestCase):
             self.assertEqual(len(results), 1)
             self.assertTrue(results[0].success)
             self.assertIsNone(results[0].data)
-            mock_page.wait_for_selector.assert_called_once_with(
-                "#async-el", timeout=500, state="attached"
-            )
+            mock_locator.wait_for.assert_called_once_with(timeout=500, state="attached")
 
         asyncio.run(run_test())
 

@@ -57,3 +57,4 @@ reproduce_json_error.py
 test_google_*.png
 docs/
 notebooks/
+/test_*

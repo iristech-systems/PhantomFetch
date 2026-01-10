@@ -1,6 +1,9 @@
 import asyncio
 import json
+import os
 from typing import Any, Literal, cast
+
+from loguru import logger
 
 from .cache import Cache
 from .engines import BaaSEngine, CDPEngine, CurlEngine
@@ -122,7 +125,11 @@ class Fetcher:
 
         # Concurrency control
         self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._max_open_browsers = max_concurrent_browser
         self._browser_semaphore = asyncio.Semaphore(max_concurrent_browser)
+
+        # Session persistence
+        self.session_data: dict[str, Any] | None = None
 
         # Defaults
         self.timeout = timeout
@@ -136,7 +143,48 @@ class Fetcher:
     async def __aexit__(self, *args: Any) -> None:
         await self._browser.disconnect()
 
-    def _normalize_actions(self, actions: list[Action | dict | str]) -> list[Action]:
+    async def start(self) -> None:
+        """
+        Start the browser engine.
+        """
+        if self._browser:
+            await self._browser.start()
+
+    async def stop(self) -> None:
+        """
+        Stop the browser engine.
+        """
+        if self._browser:
+            await self._browser.stop()
+
+    def save_session(self, path: str) -> None:
+        """
+        Save the current session storage (cookies, localStorage) to a file.
+
+        Args:
+            path: Path to save the session JSON file.
+        """
+        if not self.session_data:
+            logger.warning("No session data to save. Run a browser fetch first.")
+            return
+
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(self.session_data, f, indent=2)
+
+    def load_session(self, path: str) -> None:
+        """
+        Load session storage (cookies, localStorage) from a file.
+
+        Args:
+            path: Path to load the session JSON file from.
+        """
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Session file not found: {path}")
+
+        with open(path, encoding="utf-8") as f:
+            self.session_data = json.load(f)
+
+    def _normalize_actions(self, actions: list[Action | dict]) -> list[Action]:
         """Normalize action shorthands to Action objects."""
         normalized_actions: list[Action] = []
         for a in actions:
@@ -215,6 +263,8 @@ class Fetcher:
         allow_redirects: bool = True,
         wait_until: str = "domcontentloaded",
         block_resources: list[str] | None = None,
+        wait_for_url: str | None = None,
+        stealth: bool = False,
     ) -> Response:
         """
         Fetch a URL.
@@ -234,6 +284,7 @@ class Fetcher:
             allow_redirects: Follow HTTP redirects
             wait_until: Browser load state ("domcontentloaded", "load", "networkidle")
             block_resources: List of resource types to block (e.g. ["image", "media"]) (CDP only)
+            wait_for_url: Glob pattern or regex to wait for after navigation (CDP only)
 
         Returns:
             `Response` object containing status, body, cookies, etc. - check .ok or .error
@@ -259,6 +310,8 @@ class Fetcher:
                 span.set_attribute(
                     "phantomfetch.config.block_resources", block_resources
                 )
+            if wait_for_url:
+                span.set_attribute("phantomfetch.config.wait_for_url", wait_for_url)
 
             if normalized_actions:
                 span.set_attribute(
@@ -307,6 +360,9 @@ class Fetcher:
                     location=location,
                     wait_until=wait_until,
                     block_resources=block_resources,
+                    wait_for_url=wait_for_url,
+                    storage_state=self.session_data,  # Pass current session
+                    stealth=stealth,
                 )
             else:
                 resp = await self._fetch_curl(
@@ -321,6 +377,10 @@ class Fetcher:
                     referer=referer,
                     allow_redirects=allow_redirects,
                 )
+
+            # Update session data from response if present
+            if resp.storage_state:
+                self.session_data = resp.storage_state
 
             # Update proxy stats
             if proxy:
@@ -350,6 +410,9 @@ class Fetcher:
         wait_until: str,
         cookies: dict[str, str] | list[Cookie] | None = None,
         block_resources: list[str] | None = None,
+        wait_for_url: str | None = None,
+        storage_state: dict[str, Any] | None = None,
+        stealth: bool = False,
     ) -> Response:
         async with self._semaphore:
             async with self._browser_semaphore:
@@ -365,12 +428,13 @@ class Fetcher:
                         location=location,
                         wait_until=wait_until,
                         block_resources=block_resources,
+                        wait_for_url=wait_for_url,
+                        storage_state=storage_state,
+                        stealth=stealth,
                     )
                 else:
                     browser_baas = cast(BaaSEngine, self._browser)
-                    # BaaS engine doesn't support block_resources yet? Or if it does, add it.
-                    # For now just ignore for BaaS or check implementation.
-                    # Assuming BaaS doesn't support it for now based on types.
+                    # BaaS engine doesn't support block_resources or wait_for_url yet?
                     return await browser_baas.fetch(
                         url=url,
                         proxy=proxy,
@@ -379,3 +443,30 @@ class Fetcher:
                         timeout=timeout,
                         location=location,
                     )
+
+    async def _fetch_curl(
+        self,
+        url: str,
+        proxy: Proxy | None,
+        headers: dict[str, str] | None,
+        cookies: dict[str, str] | list[Cookie] | None,
+        timeout: float,
+        max_retries: int,
+        retry_on: set[int] | None,
+        retry_backoff: float | None,
+        referer: str | None,
+        allow_redirects: bool,
+    ) -> Response:
+        async with self._semaphore:
+            return await self._curl.fetch(
+                url=url,
+                proxy=proxy,
+                headers=headers,
+                cookies=cookies,
+                timeout=timeout,
+                max_retries=max_retries,
+                retry_on=retry_on,
+                retry_backoff=retry_backoff,
+                referer=referer,
+                allow_redirects=allow_redirects,
+            )

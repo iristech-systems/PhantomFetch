@@ -33,6 +33,11 @@ class ActionType(str, Enum):
     WAIT_FOR_LOAD = "wait_for_load"
     EVALUATE = "evaluate"
     SOLVE_CAPTCHA = "solve_captcha"
+    EXTRACT = "extract"
+    LOOP = "loop"
+    VALIDATE = "validate"
+    IF = "if"
+    TRY = "try"
 
 
 class Proxy(msgspec.Struct):
@@ -87,6 +92,9 @@ class Action(msgspec.Struct):
         state: State to wait for ("visible", "attached", etc.) (optional)
         x: X coordinate for scroll (optional)
         y: Y coordinate for scroll (optional)
+        schema: Extraction schema (for extract action)
+        actions: Child actions (for loop action)
+        max_iterations: Max iterations for loop (safety limit)
     """
 
     action: ActionType
@@ -94,6 +102,8 @@ class Action(msgspec.Struct):
     if_selector: str | None = None
     if_selector_timeout: int = 0
     value: str | int | None = None
+    fail_on_error: bool = False
+    human_like: bool = False
     # Validate timeout is non-negative
     timeout: Annotated[int, msgspec.Meta(ge=0)] = 30000
     api_key: str | None = None
@@ -101,6 +111,12 @@ class Action(msgspec.Struct):
     state: str | None = None
     x: int | None = None
     y: int | None = None
+    schema: dict[str, Any] | None = None
+    actions: list["Action"] | None = None
+    then_actions: list["Action"] | None = None
+    else_actions: list["Action"] | None = None
+    max_iterations: int = 100
+    scope: str | None = None
 
 
 class ActionResult(msgspec.Struct):
@@ -199,6 +215,7 @@ class Response(msgspec.Struct):
     network_log: list[NetworkExchange] = []
     cookies: list[Cookie] = []
     from_cache: bool = False
+    storage_state: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -228,3 +245,110 @@ class Response(msgspec.Struct):
             url=self.url,
             metadata={"status": str(self.status), "engine": self.engine},
         )
+
+    def save_har(self, path: str | None = None) -> str:
+        """
+        Export network log to a HAR file.
+
+        Args:
+            path: Path to save the HAR file. If None, a default name is generated
+                  based on hostname and timestamp to avoid collisions.
+
+        Returns:
+            The absolute path to the saved HAR file.
+        """
+        import json
+        import os
+        import time
+        from urllib.parse import urlparse
+
+        if not self.network_log:
+            # If empty, we still create a valid empty HAR structure
+            pass
+
+        # Generate default path if needed
+        if not path:
+            try:
+                hostname = urlparse(self.url).hostname or "unknown"
+                # Sanitize hostname
+                hostname = "".join(c for c in hostname if c.isalnum() or c in ".-_")
+            except Exception:
+                hostname = "unknown"
+
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            # Add microsecond to avoid collision in tight loops
+            micros = int(time.time() * 1000) % 1000
+            filename = f"phantomfetch_{hostname}_{timestamp}_{micros:03d}.har"
+            path = os.path.abspath(filename)
+
+        # HAR Structure
+        # Ref: http://www.softwareishard.com/blog/har-12-spec/
+
+        entries = []
+        for x in self.network_log:
+            # Parse start time? We only have duration.
+            # We don't have absolute timestamps in NetworkExchange currently.
+            # We'll mock it relative to start or current time?
+            # Ideally NetworkExchange should have 'timestamp' or 'start_time'.
+            # For now, put current time or stub.
+            # Chrome requires ISO 8601.
+            started_date_time = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+
+            req_headers = [
+                {"name": k, "value": v} for k, v in x.request_headers.items()
+            ]
+            res_headers = [
+                {"name": k, "value": v} for k, v in x.response_headers.items()
+            ]
+
+            entry = {
+                "startedDateTime": started_date_time,
+                "time": x.duration * 1000,  # ms
+                "request": {
+                    "method": x.method,
+                    "url": x.url,
+                    "httpVersion": "HTTP/1.1",  # unknown
+                    "cookies": [],  # TODO: parse from headers if needed
+                    "headers": req_headers,
+                    "queryString": [],  # TODO: parse from url
+                    "headersSize": -1,
+                    "bodySize": len(x.request_body) if x.request_body else 0,
+                },
+                "response": {
+                    "status": x.status,
+                    "statusText": str(x.status),
+                    "httpVersion": "HTTP/1.1",
+                    "cookies": [],
+                    "headers": res_headers,
+                    "content": {
+                        "size": len(x.response_body) if x.response_body else 0,
+                        "mimeType": x.response_headers.get(
+                            "content-type", "application/octet-stream"
+                        ),
+                        "text": x.response_body,
+                    },
+                    "headersSize": -1,
+                    "bodySize": len(x.response_body) if x.response_body else 0,
+                    "redirectURL": "",
+                },
+                "cache": {},
+                "timings": {
+                    "send": 0,
+                    "wait": 0,
+                    "receive": x.duration * 1000,
+                },
+            }
+            entries.append(entry)
+
+        har_data = {
+            "log": {
+                "version": "1.2",
+                "creator": {"name": "PhantomFetch", "version": "0.1.3"},
+                "entries": entries,
+            }
+        }
+
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(har_data, f, indent=2)
+
+        return path

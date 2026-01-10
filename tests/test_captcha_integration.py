@@ -1,6 +1,7 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from playwright.async_api import Page
 
 from phantomfetch.engines.browser.actions import execute_actions
 from phantomfetch.types import Action
@@ -9,7 +10,7 @@ from phantomfetch.types import Action
 @pytest.mark.asyncio
 async def test_solve_captcha_action():
     # Mock page
-    mock_page = AsyncMock()
+    mock_page = Mock(spec=Page)
     mock_page.url = "http://example.com"
 
     # Mock solver

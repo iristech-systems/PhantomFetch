@@ -8,10 +8,33 @@ from playwright.async_api import async_playwright
 from ...telemetry import get_tracer
 from ...types import Action, Cookie, Proxy, Response
 from .actions import execute_actions
+from .stealth import get_stealth_scripts
 
 tracer = get_tracer()
 
 if TYPE_CHECKING:
+    # ... (omitted shared lines) ...
+
+    async def fetch(
+        self,
+        url: str,
+        proxy: Proxy | str | None = None,
+        headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | list[Cookie] | None = None,
+        actions: list[Action] | None = None,
+        timeout: float = 30000,
+        location: str | None = None,
+        wait_until: str = "domcontentloaded",
+        block_resources: list[str] | None = None,
+        wait_for_url: str | None = None,
+        storage_state: dict[str, Any] | None = None,
+        stealth: bool = False,
+    ) -> Response:
+        """
+        Fetch a URL using CDP.
+        """
+        # Start tracer span ...
+
     from playwright.async_api import Response as PlaywrightResponse
     from playwright.async_api import Route
 
@@ -36,6 +59,7 @@ class CDPEngine:
         timeout: float = 60.0,
         cache: Optional["Cache"] = None,
         use_existing_page: bool = True,
+        user_agent: str | None = None,
     ):
         """
         Args:
@@ -46,6 +70,7 @@ class CDPEngine:
             cache: Cache instance for sub-resource caching
             use_existing_page: When connecting to remote CDP, reuse existing page
                                if available (useful for recording services like Scrapeless)
+            user_agent: Custom user agent string
         """
         self.cdp_endpoint = cdp_endpoint
         self.headless = headless
@@ -53,6 +78,7 @@ class CDPEngine:
         self.timeout = timeout
         self.cache = cache
         self.use_existing_page = use_existing_page
+        self.user_agent = user_agent
 
         self._playwright: Any = None
         self._browser: Any = None
@@ -204,10 +230,13 @@ class CDPEngine:
         headers: dict[str, str] | None = None,
         cookies: dict[str, str] | list[Cookie] | None = None,
         actions: list[Action] | None = None,
-        timeout: float | None = None,
+        timeout: float = 30.0,
         location: str | None = None,
         wait_until: str = "domcontentloaded",
         block_resources: list[str] | None = None,
+        wait_for_url: str | None = None,
+        storage_state: dict[str, Any] | None = None,
+        stealth: bool = False,
     ) -> Response:
         """
         Fetch a URL using Playwright.
@@ -221,6 +250,8 @@ class CDPEngine:
             timeout: Page timeout override
             wait_until: Load state to wait for (domcontentloaded, load, networkidle)
             block_resources: List of resource types to block (e.g., ["image", "media"])
+            wait_for_url: Glob pattern or regex to wait for after navigation
+            storage_state: Dict containing 'cookies' and 'origins' (localStorage) to restore
 
         Returns:
             Response object
@@ -237,36 +268,37 @@ class CDPEngine:
             if proxy:
                 span.set_attribute("phantomfetch.proxy", proxy.url)
 
+            if wait_for_url:
+                span.set_attribute("phantomfetch.browser.wait_for_url", wait_for_url)
+
             if headers:
-                # Track custom headers for debugging/analytics
-                span.set_attribute(
-                    "phantomfetch.browser.custom_headers", list(headers.keys())
-                )
+                span.set_attribute("phantomfetch.headers.count", len(headers))
 
-            if block_resources:
-                span.set_attribute(
-                    "phantomfetch.browser.block_resources", block_resources
-                )
-
+            # Ensure browser is running
             if not self._browser:
-                return Response(
-                    url=url,
-                    status=0,
-                    body=b"",
-                    engine="browser",
-                    error="Browser not connected. Call connect() first.",
-                )
+                await self.connect()
 
-            start = time.perf_counter()
-            timeout = timeout or self.timeout
-            timeout_ms = int(timeout * 1000)
+            # Create context
+            # We create a fresh context for each request to ensure isolation
+            # unless we specifically want to share state (TODO: session support)
+            # Update: storage_state passed in allows checking/setting state
 
-            # Context options
             context_opts = {}
+            if self.user_agent:
+                context_opts["user_agent"] = self.user_agent
+            if self.viewport:
+                context_opts["viewport"] = self.viewport
+
             if proxy:
-                context_opts["proxy"] = {"server": proxy.url}
-            if headers:
-                context_opts["extra_http_headers"] = headers
+                context_opts["proxy"] = {
+                    "server": proxy.url,
+                    # TODO: Auth if in URL? Playwright parses user:pass from server URL usually
+                    # but sometimes explicit username/password needed.
+                    # For now assuming proxy.url has it.
+                }
+
+            # If we have basic cookies to set via context creation (simpler than add_cookies sometimes)
+            # But better to use add_cookies for consistency with 'cookies' arg
 
             browser_context = None
             page = None
@@ -282,10 +314,75 @@ class CDPEngine:
                 else:
                     # Create new context/page as before
                     browser_context = await self._browser.new_context(**context_opts)
-                    page = await browser_context.new_page()
 
-                # Set cookies
-                if cookies and not using_existing:
+                    # Inject Stealth Scripts
+                    if stealth:
+                        logger.debug("[cdp] Injecting stealth scripts")
+                        for script in get_stealth_scripts():
+                            await browser_context.add_init_script(script)
+                    # Note: page creation happens later now? No, restoring it here or below.
+                    # Previous logic had new_page() here.
+
+            except Exception as e:
+                span.record_exception(e)
+                # Retry once if browser crashed?
+                # For now just fail
+                return Response(
+                    url=url,
+                    status=0,
+                    body=b"",
+                    engine="browser",
+                    error=f"Failed to create context: {e}",
+                )
+
+            start = time.perf_counter()
+            timeout = timeout or self.timeout
+            timeout_ms = int(timeout * 1000)
+            network_log: list[Any] = []
+
+            try:
+                # 1. Restore storage state (localStorage) BEFORE page creation if possible
+                # Actually, localStorage needs a page/origin.
+                # Playwright has context.storage_state() but that's for Loading.
+                # To SET localStorage, we generally need `add_init_script`.
+
+                if storage_state:
+                    # Restore cookies
+                    if "cookies" in storage_state:
+                        await browser_context.add_cookies(storage_state["cookies"])
+
+                    # Restore localStorage
+                    # Format expected: {"origins": [{"origin": "https://...", "localStorage": [{"name": "k", "value": "v"}]}]}
+                    # Or simple dict? Let's use Playwright's storage_state format if possible,
+                    # but if we manage it manually:
+                    # We'll stick to a simple custom format or Playwright's.
+                    # Let's assume custom for now: {"cookies": [...], "local_storage": {"origin": {"k": "v"}}}
+                    # Actually valid Playwright storage_state is best.
+                    # If we use context.add_init_script, we can inject it.
+                    if "origins" in storage_state:
+                        for origin_data in storage_state["origins"]:
+                            origin = origin_data["origin"]
+                            ls_data = origin_data[
+                                "localStorage"
+                            ]  # list of {name, value}
+                            # Construct JS to set items
+                            js_setter = ""
+                            for item in ls_data:
+                                k = item["name"].replace('"', '\\"')
+                                v = item["value"].replace('"', '\\"')
+                                js_setter += (
+                                    f'window.localStorage.setItem("{k}", "{v}");'
+                                )
+
+                            script = f"""
+                            if (window.location.origin === "{origin}") {{
+                                {js_setter}
+                            }}
+                            """
+                            await browser_context.add_init_script(script)
+
+                # 2. Set per-request cookies
+                if cookies:
                     pw_cookies = []
                     if isinstance(cookies, dict):
                         for name, value in cookies.items():
@@ -315,7 +412,17 @@ class CDPEngine:
 
                     await browser_context.add_cookies(pw_cookies)
 
-                page.set_default_timeout(timeout_ms)
+                # 3. Set headers
+                if headers:
+                    await browser_context.set_extra_http_headers(headers)
+
+                # Create page if not reusing existing
+                if not using_existing:
+                    # If storing state, we should have done it on context.
+                    page = await browser_context.new_page()
+
+                if page:
+                    page.set_default_timeout(timeout_ms)
 
                 # Setup network capture
                 network_log: list[Any] = []
@@ -369,6 +476,22 @@ class CDPEngine:
                                     # If duration < 0 (e.g. from cache or served locally), set 0
                                     duration = max(0.0, duration)
 
+                                # Capture request body safely
+                                req_body = None
+                                try:
+                                    req_body = req.post_data
+                                except Exception:
+                                    # e.g. UnicodeDecodeError if binary
+                                    # Try to get buffer and decode replacing errors?
+                                    try:
+                                        buf = req.post_data_buffer
+                                        if buf:
+                                            req_body = buf.decode(
+                                                "utf-8", errors="replace"
+                                            )
+                                    except Exception:
+                                        req_body = "<Failed to capture request body>"
+
                                 network_log.append(
                                     NetworkExchange(
                                         url=response.url,
@@ -377,7 +500,7 @@ class CDPEngine:
                                         resource_type=req.resource_type,
                                         request_headers=await req.all_headers(),
                                         response_headers=await response.all_headers(),
-                                        request_body=req.post_data,
+                                        request_body=req_body,
                                         response_body=resp_body,
                                         duration=duration,
                                     )
@@ -412,14 +535,84 @@ class CDPEngine:
                 page.on("response", on_response)
 
                 # Navigate
-                response = await page.goto(
-                    url, wait_until=wait_until, timeout=timeout_ms
-                )
+                span.add_event("navigation.start")
+                try:
+                    response = await page.goto(
+                        url, timeout=timeout_ms, wait_until=wait_until
+                    )
+                except Exception as e:
+                    span.record_exception(e)
+                    return Response(
+                        url=url,
+                        status=0,
+                        body=b"",
+                        engine="browser",
+                        error=str(e),
+                        network_log=network_log,
+                    )
+                span.add_event("navigation.end")
+
+                # Handle wait_for_url (e.g. CAPTCHA interrupt)
+                if wait_for_url:
+                    span.add_event("wait_for_url.start")
+                    try:
+                        await page.wait_for_url(
+                            wait_for_url, timeout=timeout_ms, wait_until=wait_until
+                        )
+                    except Exception as e:
+                        logger.warning(f"[cdp] wait_for_url failed: {e}")
+                        span.record_exception(e)
+                        # Option 2: Strict Waiting - Return error response
+                        return Response(
+                            url=page.url,
+                            status=0,  # Or appropriate error code
+                            body=(await page.content()).encode(
+                                "utf-8"
+                            ),  # Include body for debugging
+                            engine="browser",
+                            error=f"Wait for URL failed: {wait_for_url}. Current URL: {page.url}",
+                            network_log=network_log,
+                        )
+                    span.add_event("wait_for_url.end")
 
                 # Execute actions
                 action_results = []
                 if actions:
-                    action_results = await execute_actions(page, actions)
+                    span.add_event("actions.start")
+                    try:
+                        action_results = await execute_actions(page, actions)
+                    except RuntimeError as e:
+                        # Catch Fail Fast exceptions
+                        logger.warning(f"[cdp] Action fail_on_error triggered: {e}")
+                        span.record_exception(e)
+                        return Response(
+                            url=page.url,
+                            status=0,
+                            body=(await page.content()).encode("utf-8"),
+                            engine="browser",
+                            error=f"Action Execution Failed: {e}",
+                            network_log=network_log,
+                            # We might have partial results if execute_actions appends before raising
+                            # But execute_actions usually returns the list.
+                            # In failure case, it raises, so we don't get the list return value.
+                            # However, we modified execute_actions to raise, so we lose the list unless we modify it to attach results to exception.
+                            # For now, simplistic error return is fine.
+                            action_results=[],
+                        )
+                    span.add_event("actions.end")
+
+                    # Check for validation failures (legacy validate action check)
+                    for ar in action_results:
+                        if not ar.success and ar.action.action == "validate":
+                            return Response(
+                                url=page.url,
+                                status=0,
+                                body=(await page.content()).encode("utf-8"),
+                                engine="browser",
+                                error=f"Validation Action Failed: {ar.error}",
+                                network_log=network_log,
+                                action_results=action_results,
+                            )
 
                 # Get final content
                 content = await page.content()
@@ -452,6 +645,11 @@ class CDPEngine:
                         )
                     )
 
+                # Get full storage state (cookies + localStorage)
+                # We use Playwright's built-in storage_state() which gives exactly what we need
+                # Format: {"cookies": [...], "origins": [{"origin": "...", "localStorage": [...]}]}
+                current_storage_state = await browser_context.storage_state()
+
                 return Response(
                     url=page.url,
                     status=status,
@@ -464,6 +662,7 @@ class CDPEngine:
                     action_results=action_results,
                     network_log=network_log,
                     cookies=final_cookies,
+                    storage_state=current_storage_state,
                 )
 
             except Exception as e:
@@ -477,6 +676,7 @@ class CDPEngine:
                     elapsed=time.perf_counter() - start,
                     proxy_used=proxy.url if proxy else None,
                     error=str(e),
+                    network_log=network_log,
                 )
 
             finally:
