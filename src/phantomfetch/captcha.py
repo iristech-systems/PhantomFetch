@@ -106,6 +106,28 @@ class TwoCaptchaSolver:
                         token = data["request"]
                         logger.info("[captcha] Solved successfully")
                         await self._inject_token(page, token, captcha_type)
+
+                        # Optional: wait for navigation/reload if the captcha solution triggers it
+                        # The action.options might not exist, so handle it safely
+                        wait_navigation = (
+                            action.options.get("waitForNavigation", True)
+                            if action.options
+                            else True
+                        )
+                        if wait_navigation and token:
+                            try:
+                                # Wait for load event or network idle
+                                # Default to 'load' as it's safest for redirects
+                                await page.wait_for_load_state(
+                                    "load", timeout=action.timeout or 30000
+                                )
+                                logger.info(
+                                    "[captcha] Waited for navigation after solve."
+                                )
+                            except Exception as nav_err:
+                                logger.warning(
+                                    f"[captcha] Wait for navigation failed: {nav_err}"
+                                )
                         return token
 
                     if data.get("request") != "CAPCHA_NOT_READY":
@@ -165,3 +187,168 @@ class TwoCaptchaSolver:
             await page.evaluate(
                 f'document.querySelector("[name=cf-turnstile-response]").value="{token}";'
             )
+
+
+class CDPSolver:
+    """
+    Solver using Browser CDP events (e.g. for Scraping Browser).
+    """
+
+    async def solve(self, page: "Page", action: "Action") -> str | None:
+        try:
+            # 1. Start CDP session
+            # Note: page.context.new_cdp_session(page) creates a session for the target page
+            client = await page.context.new_cdp_session(page)
+
+            # 2. Setup state
+            loop = asyncio.get_running_loop()
+            finished_future = loop.create_future()
+            detected_event = asyncio.Event()
+
+            def on_detected(e):
+                logger.info(f"[captcha-cdp] Captcha detected: {e}")
+                detected_event.set()
+
+            def on_solved(e):
+                logger.info("[captcha-cdp] Captcha solved!")
+                if not finished_future.done():
+                    # Token might be in 'token' field if provided by event
+                    # The user example schema says: type, success, message, token?
+                    # But event handlers receive the event dict/payload.
+                    # We assume 'e' is the dict.
+                    token = e.get("token")
+                    finished_future.set_result(token or "SOLVED_NO_TOKEN")
+
+            def on_failed(e):
+                logger.error(f"[captcha-cdp] Captcha failed: {e}")
+                if not finished_future.done():
+                    finished_future.set_result(None)  # Treat as failure
+
+            client.on("Captcha.detected", on_detected)
+            client.on("Captcha.solveFinished", on_solved)
+            client.on("Captcha.solveFailed", on_failed)
+
+            # 3. Configure
+            if action.options:
+                import json
+
+                # Check for config to send
+                # The user example uses 'Captcha.setConfig' with a 'config' dict/json string
+                # We expect action.options to contain the config fields directly or wrapped?
+                # Let's assume action.options IS the config dict.
+                # format: client.send('Captcha.setConfig', {'config': json.dumps(options)})
+
+                # Extract specific config keys if mixed with other options?
+                # For now, pass all options as config
+
+                # Filter options?
+                config_payload = action.options.copy()
+                # Remove non-captcha options if any (like 'detectTimeout' which we use locally)
+                detect_timeout = config_payload.pop("detectTimeout", 5000)
+
+                # Only set config if there are keys left
+                passed_config = {
+                    k: v
+                    for k, v in config_payload.items()
+                    if k
+                    not in [
+                        "autoSolve",
+                        "enabledForRecaptcha",
+                        "enabledForRecaptchaV3",
+                        "enabledForTurnstile",
+                        "apiKey",
+                    ]
+                    or True  # actually user might pass anything
+                }
+
+                # Actually, strictly following user example:
+                # { "apiKey": ..., "autoSolve": ... }
+                # We'll valid keys or just pass everything.
+
+                if passed_config:
+                    await client.send(
+                        "Captcha.setConfig", {"config": json.dumps(passed_config)}
+                    )
+
+            # Detect phase
+            # If "if detected wait for finished" is the logic:
+            # We wait for 'detectTimeout' (default e.g. 5s).
+            # If detected -> wait for 'timeout' (action.timeout) for resolution.
+            # If not detected -> return None (assume clear)
+
+            detect_timeout = (
+                action.options.get("detectTimeout", 3000) if action.options else 3000
+            )
+
+            try:
+                # We also check if we should trigger solve manually?
+                # User said: "most of the time... automatically"
+                # So we just wait.
+
+                logger.debug(
+                    f"[captcha-cdp] Monitoring for CAPTCHA (timeout={detect_timeout}ms)"
+                )
+
+                # Wait for detected event OR finished event (if we missed detected)
+                # We can race (sleep(detect), finished_future)
+                # But we also want to know if 'detected' happened to extend timeout.
+
+                # Wait for detected or finished
+                done, _ = await asyncio.wait(
+                    [asyncio.create_task(detected_event.wait()), finished_future],
+                    timeout=detect_timeout / 1000,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if finished_future in done:
+                    # Solved!
+                    token = finished_future.result()
+
+                    # Optional: wait for navigation/reload if the captcha solution triggers it
+                    wait_navigation = (
+                        action.options.get("waitForNavigation", True)
+                        if action.options
+                        else True
+                    )
+                    if wait_navigation and token:
+                        try:
+                            # Give the page a moment to react to the token injection
+                            # This prevents wait_for_load_state from returning immediately if the navigation hasn't started yet
+                            # Increasing to 3.0s as 0.5s was insufficient for some redirects
+                            await asyncio.sleep(3.0)
+
+                            # Wait for load event or network idle
+                            # Default to 'load' as it's safest for redirects
+                            await page.wait_for_load_state(
+                                "load", timeout=action.timeout or 30000
+                            )
+                            logger.info(
+                                "[captcha-cdp] Waited for navigation after solve."
+                            )
+                        except Exception as nav_err:
+                            logger.warning(
+                                f"[captcha-cdp] Wait for navigation failed: {nav_err}"
+                            )
+
+                    return token
+
+                if detected_event.is_set():
+                    # Detected! Now wait for full timeout
+                    logger.info("[captcha-cdp] Detected! Waiting for solution...")
+                    remaining_timeout = max(0, action.timeout - detect_timeout) / 1000
+                    return await asyncio.wait_for(
+                        finished_future, timeout=remaining_timeout
+                    )
+
+                # If we got here, we timed out on detection
+                logger.debug("[captcha-cdp] No CAPTCHA detected within timeout.")
+                return None
+
+            except TimeoutError:
+                if detected_event.is_set():
+                    logger.error("[captcha-cdp] Timed out waiting for solution.")
+                return None
+
+        except Exception as e:
+            logger.error(f"[captcha-cdp] Error: {e}")
+            return None

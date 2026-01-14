@@ -438,7 +438,28 @@ async def execute_actions(
 
                     case "screenshot":
                         path = str(action.value) if action.value else None
-                        img_bytes = await ctx.screenshot(path=path)
+
+                        kwargs = {}
+                        if action.full_page:
+                            kwargs["full_page"] = True
+
+                        if action.options:
+                            # Map allowed options to playwright screenshot kwargs
+                            allowed = [
+                                "type",
+                                "quality",
+                                "omit_background",
+                                "clip",
+                                "mask",
+                                "animations",
+                                "caret",
+                                "scale",
+                            ]
+                            for k, v in action.options.items():
+                                if k in allowed:
+                                    kwargs[k] = v
+
+                        img_bytes = await ctx.screenshot(path=path, **kwargs)
                         if not path:
                             result.data = img_bytes
 
@@ -476,15 +497,27 @@ async def execute_actions(
                     case "solve_captcha":
                         # Requires Page context for solver
                         target_page = ctx if isinstance(ctx, Page) else ctx.page
-                        from ...captcha import TwoCaptchaSolver
 
-                        solver = TwoCaptchaSolver()
+                        if action.provider in ("cdp", "scraping_browser"):
+                            from ...captcha import CDPSolver
+
+                            solver = CDPSolver()
+                        else:
+                            from ...captcha import TwoCaptchaSolver
+
+                            solver = TwoCaptchaSolver()
+
                         token = await solver.solve(target_page, action)
+                        # Token might be None if no captcha detected or failed
                         if token:
                             result.data = token
-                        else:
+                        elif action.fail_on_error:
+                            # If we strictly required a solution
                             result.success = False
-                            result.error = "Failed to solve CAPTCHA"
+                            result.error = "Failed to solve CAPTCHA or none detected"
+                        else:
+                            # Treated as success/skipped if no captcha found and not strict
+                            result.data = "No CAPTCHA resolved"
 
                     case "if":
                         # Check condition (selector presence)

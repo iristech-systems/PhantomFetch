@@ -95,6 +95,8 @@ class Action(msgspec.Struct):
         schema: Extraction schema (for extract action)
         actions: Child actions (for loop action)
         max_iterations: Max iterations for loop (safety limit)
+        full_page: Whether to take a full page screenshot (screenshot action)
+        options: Additional options for the action (e.g. screenshot quality, captcha config)
     """
 
     action: ActionType
@@ -116,7 +118,10 @@ class Action(msgspec.Struct):
     then_actions: list["Action"] | None = None
     else_actions: list["Action"] | None = None
     max_iterations: int = 100
+    max_iterations: int = 100
     scope: str | None = None
+    full_page: bool = False
+    options: dict[str, Any] | None = None
 
 
 class ActionResult(msgspec.Struct):
