@@ -5,6 +5,11 @@ All notable changes to PhantomFetch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-01-19
+
+### Fixed
+- **CDP Stability**: Enhanced error handling in `CDPEngine` to prevent "Target page, context or browser has been closed" errors from concealing true connection failures (e.g., timeouts, disconnects). If the browser disconnects during `wait_for_url` or action execution, the engine now returns the original error and an empty body instead of crashing during error reporting.
+
 ## [0.2.1] - 2026-01-13
 
 ### Added

@@ -439,9 +439,15 @@ async def execute_actions(
                     case "screenshot":
                         path = str(action.value) if action.value else None
 
+                        # Handle full_page on Locator (not supported, must use Page)
+                        screenshot_ctx = ctx
                         kwargs = {}
                         if action.full_page:
                             kwargs["full_page"] = True
+                            if not isinstance(ctx, Page):
+                                # If we are in a Locator (e.g. inside loop loop), but want full page,
+                                # we must switch to the page context.
+                                screenshot_ctx = ctx.page
 
                         if action.options:
                             # Map allowed options to playwright screenshot kwargs
@@ -459,7 +465,7 @@ async def execute_actions(
                                 if k in allowed:
                                     kwargs[k] = v
 
-                        img_bytes = await ctx.screenshot(path=path, **kwargs)
+                        img_bytes = await screenshot_ctx.screenshot(path=path, **kwargs)
                         if not path:
                             result.data = img_bytes
 

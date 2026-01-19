@@ -563,12 +563,18 @@ class CDPEngine:
                         logger.warning(f"[cdp] wait_for_url failed: {e}")
                         span.record_exception(e)
                         # Option 2: Strict Waiting - Return error response
+
+                        # Safely capture content
+                        body_content = b""
+                        try:
+                            body_content = (await page.content()).encode("utf-8")
+                        except Exception:
+                            body_content = b""
+
                         return Response(
                             url=page.url,
                             status=0,  # Or appropriate error code
-                            body=(await page.content()).encode(
-                                "utf-8"
-                            ),  # Include body for debugging
+                            body=body_content,
                             engine="browser",
                             error=f"Wait for URL failed: {wait_for_url}. Current URL: {page.url}",
                             network_log=network_log,
@@ -585,10 +591,17 @@ class CDPEngine:
                         # Catch Fail Fast exceptions
                         logger.warning(f"[cdp] Action fail_on_error triggered: {e}")
                         span.record_exception(e)
+                        # Safely capture content
+                        body_content = b""
+                        try:
+                            body_content = (await page.content()).encode("utf-8")
+                        except Exception:
+                            body_content = b""
+
                         return Response(
                             url=page.url,
                             status=0,
-                            body=(await page.content()).encode("utf-8"),
+                            body=body_content,
                             engine="browser",
                             error=f"Action Execution Failed: {e}",
                             network_log=network_log,
@@ -604,10 +617,17 @@ class CDPEngine:
                     # Check for validation failures (legacy validate action check)
                     for ar in action_results:
                         if not ar.success and ar.action.action == "validate":
+                            # Safely capture content
+                            body_content = b""
+                            try:
+                                body_content = (await page.content()).encode("utf-8")
+                            except Exception:
+                                body_content = b""
+
                             return Response(
                                 url=page.url,
                                 status=0,
-                                body=(await page.content()).encode("utf-8"),
+                                body=body_content,
                                 engine="browser",
                                 error=f"Validation Action Failed: {ar.error}",
                                 network_log=network_log,

@@ -58,3 +58,5 @@ test_google_*.png
 docs/_build/
 notebooks/
 /test_*
+/scrape*.py
+/new_*.py
