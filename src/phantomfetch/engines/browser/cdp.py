@@ -394,10 +394,11 @@ class CDPEngine:
                             c: dict[str, Any] = {
                                 "name": cookie.name,
                                 "value": cookie.value,
-                                "url": url,
                             }
                             if cookie.domain:
                                 c["domain"] = cookie.domain
+                            else:
+                                c["url"] = url
                             if cookie.path:
                                 c["path"] = cookie.path
                             if cookie.expires:

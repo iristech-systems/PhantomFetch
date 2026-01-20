@@ -1,6 +1,6 @@
 [project]
 name = "phantomfetch"
-version = "0.2.2"
+version = "0.2.3"
 description = "High-performance agentic web scraping library combining curl-cffi speed with Playwright browser capabilities"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -37,6 +37,7 @@ dependencies = [
     "opentelemetry-api>=1.38.0",
     "opentelemetry-sdk>=1.38.0",
     "loguru>=0.7.3",
+    "beautifulsoup4>=4.14.3",
 ]
 
 [project.urls]
