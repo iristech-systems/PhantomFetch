@@ -172,18 +172,42 @@ async with Fetcher(cache=cache) as f:
 Multiple proxy strategies available:
 
 ```python
-from phantomfetch import Fetcher, Proxy
+from phantomfetch import Fetcher, Proxy, ProxyPool
 
+# 1. Define Typed Proxies
 proxies = [
-    Proxy(url="http://user:pass@proxy1:8080", location="US", weight=2),
-    Proxy(url="http://user:pass@proxy2:8080", location="EU", weight=1),
+    Proxy(
+        url="http://user:pass@residential-us.com:8080", 
+        location="US", 
+        vendor="BrightData",
+        proxy_type="residential",
+        weight=10
+    ),
+    Proxy(
+        url="http://user:pass@datacenter-de.com:8080", 
+        location="DE", 
+        vendor="OxyLabs",
+        proxy_type="datacenter",
+        weight=1
+    ),
 ]
 
-async with Fetcher(
-    proxies=proxies,
-    proxy_strategy="round_robin"  # or "random", "sticky", "geo_match"
-) as f:
-    resp = await f.fetch("https://example.com")
+# 2. Create a Smart Pool
+pool = ProxyPool(proxies, strategy="geo_match")
+
+async with Fetcher(proxies=pool) as f:
+    # Uses US proxy from pool (geo-match)
+    await f.fetch("https://google.com", location="US")
+
+    # Uses any available proxy (fallback)
+    await f.fetch("https://example.com")
+    
+    # 3. Explicit Override (Bypass Pool)
+    # Useful for debugging or specific routing needs
+    await f.fetch(
+        "https://httpbin.org/ip", 
+        proxy="http://user:pass@specific-proxy:8080"
+    )
 ```
 
 ### Observability (OpenTelemetry)

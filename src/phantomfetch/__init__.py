@@ -1,11 +1,10 @@
-from .cache import FileSystemCache
-from .engines import BaaSEngine, CDPEngine, CurlEngine
+from .cache import Cache, FileSystemCache
+from .engines import CDPEngine, CurlEngine
 from .fetch import Fetcher
 from .pool import ProxyPool
 from .types import (
     Action,
     ActionType,
-    BrowserEndpoint,
     Cookie,
     EngineType,
     NetworkExchange,
@@ -62,8 +61,6 @@ get = fetch
 __all__ = [
     "Action",
     "ActionType",
-    "BaaSEngine",
-    "BrowserEndpoint",
     "CDPEngine",
     "Cookie",
     "CurlEngine",

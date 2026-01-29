@@ -3,12 +3,12 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from loguru import logger
 from opentelemetry import context
-from playwright.async_api import async_playwright
+from rebrowser_playwright.async_api import async_playwright
 
 from ...telemetry import get_tracer
 from ...types import Action, Cookie, Proxy, Response
 from .actions import execute_actions
-from .stealth import get_stealth_scripts
+from undetected_playwright import stealth_async
 
 tracer = get_tracer()
 
@@ -35,8 +35,8 @@ if TYPE_CHECKING:
         """
         # Start tracer span ...
 
-    from playwright.async_api import Response as PlaywrightResponse
-    from playwright.async_api import Route
+    from rebrowser_playwright.async_api import Response as PlaywrightResponse
+    from rebrowser_playwright.async_api import Route
 
     from ...cache import Cache
 
@@ -105,7 +105,8 @@ class CDPEngine:
         else:
             logger.info(f"[cdp] Launching local browser (headless={self.headless})")
             self._browser = await self._playwright.chromium.launch(
-                headless=self.headless
+                headless=self.headless,
+                args=["--disable-blink-features=AutomationControlled"],
             )
 
     async def disconnect(self) -> None:
@@ -316,13 +317,6 @@ class CDPEngine:
                     browser_context = await self._browser.new_context(**context_opts)
 
                     # Inject Stealth Scripts
-                    if stealth:
-                        logger.debug("[cdp] Injecting stealth scripts")
-                        for script in get_stealth_scripts():
-                            await browser_context.add_init_script(script)
-                    # Note: page creation happens later now? No, restoring it here or below.
-                    # Previous logic had new_page() here.
-
             except Exception as e:
                 span.record_exception(e)
                 # Retry once if browser crashed?
@@ -334,6 +328,13 @@ class CDPEngine:
                     engine="browser",
                     error=f"Failed to create context: {e}",
                 )
+
+            # Apply stealth (works for both new and existing contexts)
+            # Note: For remote browsers, launch args like --disable-blink-features=AutomationControlled
+            # must be set by the *server* at launch time. We cannot retroactively apply them here.
+            if stealth and browser_context:
+                logger.debug("[cdp] Applying stealth_async")
+                await stealth_async(browser_context)
 
             start = time.perf_counter()
             timeout = timeout or self.timeout
@@ -636,7 +637,20 @@ class CDPEngine:
                             )
 
                 # Get final content
-                content = await page.content()
+                # Get final content with retry for navigation race conditions
+                content = ""
+                for i in range(3):
+                    try:
+                        content = await page.content()
+                        break
+                    except Exception as e:
+                        if "Unable to retrieve content" in str(e) and i < 2:
+                            logger.debug(f"[cdp] Retrying content retrieval due to navigation ({i+1}/3)")
+                            await asyncio.sleep(0.5)
+                        else:
+                            logger.warning(f"[cdp] Failed to retrieve content: {e}")
+                            content = ""  # Return empty or partial if failed
+                            break
                 status = response.status if response else 0
                 resp_headers = dict(response.headers) if response else {}
 

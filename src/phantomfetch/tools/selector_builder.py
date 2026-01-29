@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 
-from playwright.async_api import async_playwright
+from rebrowser_playwright.async_api import async_playwright
 
 
 async def generate_selectors(page, target_text):

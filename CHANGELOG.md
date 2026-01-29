@@ -5,6 +5,26 @@ All notable changes to PhantomFetch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-01-29
+
+### Added
+- **Smart Proxy Management**: `ProxyPool` now tracks proxy health with exponential backoff cool-downs and fail-open logic.
+- **Explicit Proxy Override**: Added `proxy` argument to `fetch()` to bypass the pool for specific requests.
+- **Proxy Metadata**: Enhanced `Proxy` struct with `vendor`, `proxy_type`, `cooldown_until`, and `metadata` fields.
+- **Stealth Upgrade**: Switched to `rebrowser-playwright` and `undetected-playwright` for superior bot evasion.
+
+### Changed
+- **Curl Stealth**: Updated `CurlEngine` to default to modern browser impersonations (`chrome124`, `safari17`) and rely on native `curl_cffi` header generation for better Akamai bypass.
+- **Cache Keys**: Updated `Fetcher` cache key generation to include `location` and `proxy`, ensuring correct caching for geo-targeted requests.
+- **Browser Engine**: `Fetcher` now defaults to `CDPEngine` exclusively. The `browser_engine` argument is preserved for backward compatibility but strictly validates usage.
+
+### Fixed
+- **Race Condition**: Fixed `Page.content()` race condition in `CDPEngine` during navigation.
+- **Import Errors**: Fixed missing `async_playwright` import in `actions.py`.
+
+### Removed
+- **BaaSEngine**: Removed legacy `BaaSEngine` and `BrowserEndpoint`. Usage of `browser_engine="baas"` now raises a descriptive error.
+
 ## [0.2.3] - 2026-01-20
 
 ### Fixed
@@ -160,3 +180,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [0.1.1]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.1.1
 [0.1.2]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.1.2
+[0.1.4]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.1.4
+[0.1.5]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.1.5
+[0.2.0]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.2.0
+[0.2.1]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.2.1
+[0.2.2]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.2.2
+[0.2.3]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.2.3
+[0.3.0]: https://github.com/iristech-systems/PhantomFetch/releases/tag/v0.3.0

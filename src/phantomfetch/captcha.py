@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Protocol
 import httpx
 
 if TYPE_CHECKING:
-    from playwright.async_api import Page
+    from rebrowser_playwright.async_api import Page
 
     from .types import Action
 

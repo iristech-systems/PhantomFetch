@@ -5,7 +5,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from playwright.async_api import Locator, Page
+    from rebrowser_playwright.async_api import Locator, Page
 
     from ...types import ActionResult
 
@@ -71,7 +71,7 @@ async def execute_actions(
     Returns:
         List of ActionResult objects
     """
-    from playwright.async_api import Page
+    from rebrowser_playwright.async_api import Page
 
     from ...types import ActionResult
 
@@ -644,7 +644,13 @@ async def execute_actions(
 
             finally:
                 result.duration = time.perf_counter() - start_time
-                # ... existing trace updates ...
+                
+                # Enhanced OTel Attributes
+                span.set_attribute("phantomfetch.action.success", result.success)
+                span.set_attribute("phantomfetch.action.duration_ms", result.duration * 1000)
+                if result.error:
+                    span.set_attribute("phantomfetch.action.error", str(result.error))
+
                 results.append(result)
 
     return results

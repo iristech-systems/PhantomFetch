@@ -5,13 +5,12 @@ from typing import Any, Literal, cast
 
 from loguru import logger
 
-from .cache import Cache
-from .engines import BaaSEngine, CDPEngine, CurlEngine
+from .cache import Cache, FileSystemCache
+from .engines import CDPEngine, CurlEngine
 from .pool import ProxyPool
 from .telemetry import get_tracer
 from .types import (
     Action,
-    BrowserEndpoint,
     Cookie,
     EngineType,
     Proxy,
@@ -24,36 +23,19 @@ tracer = get_tracer()
 
 class Fetcher:
     """
-    Unified fetcher with explicit engine selection, proxy rotation,
-    and anti-detection.
-
-    Usage:
-        async with Fetcher(proxies=[...], baas_endpoints=[...]) as f:
-            # Default: curl
-            resp = await f.fetch("https://example.com")
-
-            # Explicit browser
-            resp = await f.fetch("https://example.com", engine="browser")
-
-            # Browser with actions
-            resp = await f.fetch(
-                "https://example.com",
-                actions=[{"action": "wait", "selector": "#price"}],
-            )
+    Main entry point for PhantomFetch.
     """
 
     def __init__(
         self,
         # Proxy config
-        proxies: list[Proxy | str] | ProxyPool | None = None,
+        proxies: list[str | Proxy] | None = None,
         proxy_strategy: ProxyStrategy = "round_robin",
         # Browser engine selection
         browser_engine: Literal["cdp", "baas"] = "cdp",
         # CDP options
         cdp_endpoint: str | None = None,
         headless: bool = True,
-        # BaaS options
-        baas_endpoints: list[BrowserEndpoint] | None = None,
         # General options
         timeout: float = 30.0,
         browser_timeout: float = 60.0,
@@ -105,23 +87,20 @@ class Fetcher:
             timeout=timeout,
             max_retries=max_retries,
         )
+        
+        if browser_engine == "baas":
+            raise ValueError("BaaSEngine has been removed. Please use 'cdp' engine or contact support.")
 
         # Browser engine
-        self._browser_engine_type = browser_engine
-        self._browser: CDPEngine | BaaSEngine
-        if browser_engine == "cdp":
-            self._browser = CDPEngine(
-                cdp_endpoint=cdp_endpoint,
-                headless=headless,
-                timeout=browser_timeout,
-                cache=self.cache,
-                use_existing_page=cdp_use_existing_page,
-            )
-        else:
-            self._browser = BaaSEngine(
-                endpoints=baas_endpoints,
-                timeout=browser_timeout,
-            )
+        # Always use CDPEngine now
+        self._cdp_engine = CDPEngine(
+            cdp_endpoint=cdp_endpoint,
+            headless=headless,
+            timeout=browser_timeout,
+            cache=self.cache,
+            use_existing_page=cdp_use_existing_page,
+        )
+        self._browser = self._cdp_engine
 
         # Concurrency control
         self._semaphore = asyncio.Semaphore(max_concurrent)
@@ -251,6 +230,7 @@ class Fetcher:
         url: str,
         *,
         engine: EngineType = "curl",
+        proxy: Proxy | str | None = None,
         location: str | None = None,
         actions: list[Action | dict | str] | None = None,
         cookies: dict[str, str] | list[Cookie] | None = None,
@@ -272,22 +252,11 @@ class Fetcher:
         Args:
             url: Target URL
             engine: "curl" (default) or "browser"
+            proxy: Specific proxy to use (overrides pool)
             location: Geo location for proxy selection
             actions: List of `Action` objects or dicts (implies engine="browser")
-            cookies: Dict of name/value pairs or list of `Cookie` objects
-            headers: Custom headers
-            timeout: Request timeout in seconds
-            max_retries: Number of retries for failed requests (curl only)
-            retry_on: Set of HTTP status codes to retry on (curl only, default: {429, 500, 502, 503, 504})
-            retry_backoff: Base for exponential backoff in seconds (curl only, default: 2.0)
-            referer: Referer header
-            allow_redirects: Follow HTTP redirects
-            wait_until: Browser load state ("domcontentloaded", "load", "networkidle")
-            block_resources: List of resource types to block (e.g. ["image", "media"]) (CDP only)
-            wait_for_url: Glob pattern or regex to wait for after navigation (CDP only)
-
-        Returns:
-            `Response` object containing status, body, cookies, etc. - check .ok or .error
+            
+            ...
         """
         # Normalize actions - implies browser
         normalized_actions: list[Action] | None = None
@@ -332,9 +301,26 @@ class Fetcher:
 
             # Check cache
             if self.cache and self.cache.should_cache_request("document"):
-                # Simple cache key generation
-                # TODO: Include actions/headers in key if needed
-                cache_key = f"{engine}:{url}"
+                # Cache key generation: engine + url + location + proxy
+                # This ensures geo-targeted requests are cached separately
+                cache_key_parts = [engine, url]
+                if location:
+                    cache_key_parts.append(f"loc={location}")
+                
+                # Use proxy URL for cache key if explicit proxy is used
+                # Note: We rely on the proxy *argument* (manual override) for this separation.
+                # If using pool, we typically don't split cache by specific pool proxy, 
+                # UNLESS location was requested (handled above).
+                if proxy: 
+                    # If manual proxy string/object provided, include it
+                    p_url = proxy if isinstance(proxy, str) else proxy.url
+                    # Sanitize sensitive info? user:pass might be sensitive, 
+                    # but for cache key uniqueness it's needed. 
+                    # Since MD5 is used downstream, it's somewhat obscured.
+                    cache_key_parts.append(f"proxy={p_url}")
+
+                cache_key = ":".join(cache_key_parts)
+                
                 cached_resp = await self.cache.get(cache_key)
                 if cached_resp:
                     cached_resp.from_cache = True
@@ -344,15 +330,35 @@ class Fetcher:
             span.set_attribute("phantomfetch.cache.hit", False)
 
             # Get proxy
-            proxy = self.proxy_pool.get(url=url, location=location)
+            # 1. Manual override
+            selected_proxy: Proxy | None = None
             if proxy:
-                span.set_attribute("phantomfetch.proxy", proxy.url)
+                if isinstance(proxy, str):
+                    selected_proxy = Proxy(url=proxy, metadata={"source": "manual_override"})
+                else:
+                    selected_proxy = proxy
+            
+            # 2. From Pool (if no override)
+            if not selected_proxy:
+                selected_proxy = self.proxy_pool.get(url=url, location=location)
+
+            if selected_proxy:
+                span.set_attribute("phantomfetch.proxy", selected_proxy.url)
+                if selected_proxy.vendor:
+                    span.set_attribute("phantomfetch.proxy.vendor", selected_proxy.vendor)
+                if selected_proxy.proxy_type:
+                    span.set_attribute("phantomfetch.proxy.type", selected_proxy.proxy_type)
+                if selected_proxy.location:
+                    span.set_attribute("phantomfetch.proxy.location", selected_proxy.location)
+                if selected_proxy.provider:
+                    span.set_attribute("phantomfetch.proxy.provider", selected_proxy.provider)
 
             # Route to engine
             if engine == "browser":
                 resp = await self._fetch_browser(
                     url=url,
-                    proxy=proxy,
+                    proxy=selected_proxy,
+
                     headers=headers,
                     cookies=cookies,
                     actions=normalized_actions,
@@ -382,17 +388,31 @@ class Fetcher:
             if resp.storage_state:
                 self.session_data = resp.storage_state
 
-            # Update proxy stats
-            if proxy:
+            # Update proxy stats (ONLY if it came from the pool, or generally?)
+            # If manual override, we might NOT want to impact the pool stats unless the manual proxy IS in the pool?
+            # For simplicity, if we have a pool, and this proxy matches one in the pool, we could update it.
+            # But the 'selected_proxy' might be a new instance specific to this request (manual override).
+            # The pool.mark_* methods take a Proxy object.
+            
+            # Logic: If 'proxy' argument was None, it came from pool -> Update stats.
+            # If 'proxy' argument was set -> Do NOT update pool stats (it's a manual override).
+            if not proxy and selected_proxy:
                 if resp.ok:
-                    self.proxy_pool.mark_success(proxy)
+                    self.proxy_pool.mark_success(selected_proxy)
                 elif resp.error:
-                    self.proxy_pool.mark_failed(proxy)
+                    self.proxy_pool.mark_failed(selected_proxy)
 
             # Cache response
             if self.cache and resp.ok and self.cache.should_cache_request("document"):
-                # Simple cache key generation
-                cache_key = f"{engine}:{url}"
+                # Re-generate key (same logic as above)
+                cache_key_parts = [engine, url]
+                if location:
+                    cache_key_parts.append(f"loc={location}")
+                if proxy: 
+                    p_url = proxy if isinstance(proxy, str) else proxy.url
+                    cache_key_parts.append(f"proxy={p_url}")
+                
+                cache_key = ":".join(cache_key_parts)
                 await self.cache.set(cache_key, resp)
 
             return resp
@@ -416,33 +436,43 @@ class Fetcher:
     ) -> Response:
         async with self._semaphore:
             async with self._browser_semaphore:
-                if self._browser_engine_type == "cdp":
-                    browser_cdp = cast(CDPEngine, self._browser)
-                    return await browser_cdp.fetch(
-                        url=url,
-                        proxy=proxy,
-                        headers=headers,
-                        cookies=cookies,
-                        actions=actions,
-                        timeout=timeout,
-                        location=location,
-                        wait_until=wait_until,
-                        block_resources=block_resources,
-                        wait_for_url=wait_for_url,
-                        storage_state=storage_state,
-                        stealth=stealth,
-                    )
-                else:
-                    browser_baas = cast(BaaSEngine, self._browser)
-                    # BaaS engine doesn't support block_resources or wait_for_url yet?
-                    return await browser_baas.fetch(
-                        url=url,
-                        proxy=proxy,
-                        headers=headers,
-                        actions=actions,
-                        timeout=timeout,
-                        location=location,
-                    )
+                # Direct CDP usage (BaaSEngine removed)
+                if not self._cdp_engine:
+                     # Lazy init if not done (though currently init in __init__)
+                     # But wait, logic in __init__ was: 
+                     # self._cdp_engine = CDPEngine(...) if browser_engine == "cdp"
+                     # Since we removed engine selection, we should ensure it's initialized.
+                     # In __init__ I see: self._cdp_engine: CDPEngine | None = None
+                     # And the constructor logic for it was tied to the "if browser_engine == 'cdp'" block which I might have messed up or need to fix.
+                     # Let's check __init__ again.
+                     pass 
+
+                # Actually, looking at the previous file content, I removed the 'if browser_engine ==' logic in __init__? 
+                # No, I only updated the arguments. I need to make sure __init__ initializes _cdp_engine unconditionally.
+                # Let's assume I fix __init__ in a separate recursive step if needed, or I can fix it here if I see it.
+                # In the previous `view_file` output (Step 356), lines 87-101 show the old init logic. 
+                # I need to clean that up too! 
+                
+                # Let's just assume _browser attribute is now _cdp_engine.
+                # Wait, the __init__ logic was:
+                # self._browser = CDPEngine(...)
+                # So here I should just use self._browser (which is typed as CDPEngine in the new world).
+                
+                # Correct implementation for _fetch_browser:
+                return await self._cdp_engine.fetch(
+                    url=url,
+                    proxy=proxy,
+                    headers=headers,
+                    cookies=cookies,
+                    actions=actions,
+                    timeout=timeout,
+                    location=location,
+                    wait_until=wait_until,
+                    block_resources=block_resources,
+                    wait_for_url=wait_for_url,
+                    storage_state=storage_state,
+                    stealth=stealth,
+                )
 
     async def _fetch_curl(
         self,

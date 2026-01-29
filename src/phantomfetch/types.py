@@ -54,26 +54,16 @@ class Proxy(msgspec.Struct):
     url: str
     location: str | None = None
     provider: str | None = None
+    vendor: str | None = None
+    proxy_type: str | None = None
     weight: int = 1
     failures: int = 0
     last_used: float = 0.0
+    cooldown_until: float = 0.0
+    metadata: dict[str, Any] = {}
 
 
-class BrowserEndpoint(msgspec.Struct):
-    """
-    Browser-as-a-Service endpoint configuration.
 
-    Attributes:
-        url: API endpoint URL
-        api_key: Optional authentication token
-        max_concurrent: Max concurrent requests for this endpoint
-        location: ISO country code
-    """
-
-    url: str
-    api_key: str | None = None
-    max_concurrent: int = 10
-    location: str | None = None
 
 
 class Action(msgspec.Struct):
@@ -345,7 +335,7 @@ class Response(msgspec.Struct):
         har_data = {
             "log": {
                 "version": "1.2",
-                "creator": {"name": "PhantomFetch", "version": "0.1.3"},
+                "creator": {"name": "PhantomFetch", "version": "0.3.0"},
                 "entries": entries,
             }
         }
